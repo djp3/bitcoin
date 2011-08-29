@@ -1,12 +1,20 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
+// Copyright (c) 2011 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file license.txt or http://www.opensource.org/licenses/mit-license.php.
 #ifndef BITCOIN_KEY_H
 #define BITCOIN_KEY_H
 
+#include <stdexcept>
+#include <vector>
+
 #include <openssl/ec.h>
 #include <openssl/ecdsa.h>
 #include <openssl/obj_mac.h>
+
+#include "serialize.h"
+#include "uint256.h"
+#include "base58.h"
 
 // secp160k1
 // const unsigned int PRIVATE_KEY_SIZE = 192;
