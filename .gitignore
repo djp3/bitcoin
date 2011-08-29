@@ -4,3 +4,4 @@ src/bitcoind
 .*.swp
 *.*~*
 deps/*
+src/djp3Makeit.sh
