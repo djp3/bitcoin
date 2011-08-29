@@ -6,7 +6,7 @@
 # Laszlo Hanyecz (solar@heliacal.net)
 
 CXX=llvm-g++
-DEPSDIR=/Users/macosuser/bitcoin/deps
+DEPSDIR=/Users/djp3/Development/Mac/bitcoinBuild/bitcoin/deps
 
 INCLUDEPATHS= \
  -I"$(DEPSDIR)/include"
