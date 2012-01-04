@@ -7,12 +7,16 @@
 
 #include "bignum.h"
 #include "key.h"
+#include "keystore.h"
 #include "script.h"
 
 class CWalletTx;
 class CReserveKey;
 class CWalletDB;
 
+// A CWallet is an extension of a keystore, which also maintains a set of
+// transactions and balances, and provides the ability to create new
+// transactions
 class CWallet : public CCryptoKeyStore
 {
 private:
@@ -57,23 +61,33 @@ public:
     std::vector<unsigned char> vchDefaultKey;
 
     // keystore implementation
+    // Adds a key to the store, and saves it to disk.
     bool AddKey(const CKey& key);
+    // Adds a key to the store, without saving it to disk (used by LoadWallet)
     bool LoadKey(const CKey& key) { return CCryptoKeyStore::AddKey(key); }
+
+    // Adds an encrypted key to the store, and saves it to disk.
     bool AddCryptedKey(const std::vector<unsigned char> &vchPubKey, const std::vector<unsigned char> &vchCryptedSecret);
+    // Adds an encrypted key to the store, without saving it to disk (used by LoadWallet)
     bool LoadCryptedKey(const std::vector<unsigned char> &vchPubKey, const std::vector<unsigned char> &vchCryptedSecret) { return CCryptoKeyStore::AddCryptedKey(vchPubKey, vchCryptedSecret); }
+    bool AddCScript(const uint160& hash, const CScript& redeemScript);
+    bool LoadCScript(const uint160& hash, const CScript& redeemScript) { return CCryptoKeyStore::AddCScript(hash, redeemScript); }
 
-    bool Unlock(const std::string& strWalletPassphrase);
-    bool ChangeWalletPassphrase(const std::string& strOldWalletPassphrase, const std::string& strNewWalletPassphrase);
-    bool EncryptWallet(const std::string& strWalletPassphrase);
+    bool Unlock(const SecureString& strWalletPassphrase);
+    bool ChangeWalletPassphrase(const SecureString& strOldWalletPassphrase, const SecureString& strNewWalletPassphrase);
+    bool EncryptWallet(const SecureString& strWalletPassphrase);
 
+    void MarkDirty();
     bool AddToWallet(const CWalletTx& wtxIn);
-    bool AddToWalletIfInvolvingMe(const CTransaction& tx, const CBlock* pblock, bool fUpdate = false);
+    bool AddToWalletIfInvolvingMe(const CTransaction& tx, const CBlock* pblock, bool fUpdate = false, bool fFindBlock = false);
     bool EraseFromWallet(uint256 hash);
     void WalletUpdateSpent(const CTransaction& prevout);
     int ScanForWalletTransactions(CBlockIndex* pindexStart, bool fUpdate = false);
+    int ScanForWalletTransaction(const uint256& hashTx);
     void ReacceptWalletTransactions();
     void ResendWalletTransactions();
     int64 GetBalance() const;
+    int64 GetUnconfirmedBalance() const;
     bool CreateTransaction(const std::vector<std::pair<CScript, int64> >& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, int64& nFeeRet);
     bool CreateTransaction(CScript scriptPubKey, int64 nValue, CWalletTx& wtxNew, CReserveKey& reservekey, int64& nFeeRet);
     bool CommitTransaction(CWalletTx& wtxNew, CReserveKey& reservekey);
@@ -81,12 +95,15 @@ public:
     std::string SendMoney(CScript scriptPubKey, int64 nValue, CWalletTx& wtxNew, bool fAskFee=false);
     std::string SendMoneyToBitcoinAddress(const CBitcoinAddress& address, int64 nValue, CWalletTx& wtxNew, bool fAskFee=false);
 
+    bool NewKeyPool();
     bool TopUpKeyPool();
+    int64 AddReserveKey(const CKeyPool& keypool);
     void ReserveKeyFromKeyPool(int64& nIndex, CKeyPool& keypool);
     void KeepKey(int64 nIndex);
     void ReturnKey(int64 nIndex);
     bool GetKeyFromPool(std::vector<unsigned char> &key, bool fAllowReuse=true);
     int64 GetOldestKeyPoolTime();
+    void GetAllReserveAddresses(std::set<CBitcoinAddress>& setAddress);
 
     bool IsMine(const CTxIn& txin) const;
     int64 GetDebit(const CTxIn& txin) const;
@@ -100,15 +117,7 @@ public:
             throw std::runtime_error("CWallet::GetCredit() : value out of range");
         return (IsMine(txout) ? txout.nValue : 0);
     }
-    bool IsChange(const CTxOut& txout) const
-    {
-        CBitcoinAddress address;
-        if (ExtractAddress(txout.scriptPubKey, this, address))
-            CRITICAL_BLOCK(cs_wallet)
-                if (!mapAddressBook.count(address))
-                    return true;
-        return false;
-    }
+    bool IsChange(const CTxOut& txout) const;
     int64 GetChange(const CTxOut& txout) const
     {
         if (!MoneyRange(txout.nValue))
@@ -233,9 +242,10 @@ public:
 //
 class CWalletTx : public CMerkleTx
 {
-public:
+private:
     const CWallet* pwallet;
 
+public:
     std::vector<CMerkleTx> vtxPrev;
     std::map<std::string, std::string> mapValue;
     std::vector<std::pair<std::string, std::string> > vOrderForm;
@@ -243,7 +253,7 @@ public:
     unsigned int nTimeReceived;  // time received by this node
     char fFromMe;
     std::string strFromAccount;
-    std::vector<char> vfSpent;
+    std::vector<char> vfSpent; // which outputs are already spent
 
     // memory only
     mutable char fDebitCached;
@@ -370,12 +380,19 @@ public:
         return fReturn;
     }
 
+    // make sure balances are recalculated
     void MarkDirty()
     {
         fCreditCached = false;
         fAvailableCreditCached = false;
         fDebitCached = false;
         fChangeCached = false;
+    }
+
+    void BindWallet(CWallet *pwalletIn)
+    {
+        pwallet = pwalletIn;
+        MarkDirty();
     }
 
     void MarkSpent(unsigned int nOut)

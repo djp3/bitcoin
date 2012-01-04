@@ -4,8 +4,9 @@
 // file license.txt or http://www.opensource.org/licenses/mit-license.php.
 
 #include "headers.h"
-#include "db.h"
 #include "crypter.h"
+#include "db.h"
+#include "script.h"
 
 std::vector<unsigned char> CKeyStore::GenerateNewKey()
 {
@@ -29,8 +30,38 @@ bool CKeyStore::GetPubKey(const CBitcoinAddress &address, std::vector<unsigned c
 bool CBasicKeyStore::AddKey(const CKey& key)
 {
     CRITICAL_BLOCK(cs_KeyStore)
-        mapKeys[key.GetAddress()] = key.GetSecret();
+        mapKeys[CBitcoinAddress(key.GetPubKey())] = key.GetSecret();
     return true;
+}
+
+bool CBasicKeyStore::AddCScript(const uint160 &hash, const CScript& redeemScript)
+{
+    CRITICAL_BLOCK(cs_KeyStore)
+        mapScripts[hash] = redeemScript;
+    return true;
+}
+
+bool CBasicKeyStore::HaveCScript(const uint160& hash) const
+{
+    bool result;
+    CRITICAL_BLOCK(cs_KeyStore)
+        result = (mapScripts.count(hash) > 0);
+    return result;
+}
+
+
+bool CBasicKeyStore::GetCScript(const uint160 &hash, CScript& redeemScriptOut) const
+{
+    CRITICAL_BLOCK(cs_KeyStore)
+    {
+        ScriptMap::const_iterator mi = mapScripts.find(hash);
+        if (mi != mapScripts.end())
+        {
+            redeemScriptOut = (*mi).second;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool CCryptoKeyStore::SetCrypted()
@@ -116,23 +147,19 @@ bool CCryptoKeyStore::AddCryptedKey(const std::vector<unsigned char> &vchPubKey,
     return true;
 }
 
-bool CCryptoKeyStore::GetKey(const CBitcoinAddress &address, CKey& keyOut) const
+bool CCryptoKeyStore::GetSecret(const CBitcoinAddress &address, CSecret& vchSecretOut) const
 {
     CRITICAL_BLOCK(cs_KeyStore)
     {
         if (!IsCrypted())
-            return CBasicKeyStore::GetKey(address, keyOut);
+            return CBasicKeyStore::GetSecret(address, vchSecretOut);
 
         CryptedKeyMap::const_iterator mi = mapCryptedKeys.find(address);
         if (mi != mapCryptedKeys.end())
         {
             const std::vector<unsigned char> &vchPubKey = (*mi).second.first;
             const std::vector<unsigned char> &vchCryptedSecret = (*mi).second.second;
-            CSecret vchSecret;
-            if (!DecryptSecret(vMasterKey, vchCryptedSecret, Hash(vchPubKey.begin(), vchPubKey.end()), vchSecret))
-                return false;
-            keyOut.SetSecret(vchSecret);
-            return true;
+            return DecryptSecret(vMasterKey, vchCryptedSecret, Hash(vchPubKey.begin(), vchPubKey.end()), vchSecretOut);
         }
     }
     return false;

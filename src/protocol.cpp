@@ -6,7 +6,7 @@
 #include "protocol.h"
 #include "util.h"
 
-#ifndef __WXMSW__
+#ifndef WIN32
 # include <arpa/inet.h>
 #endif
 
@@ -223,7 +223,7 @@ bool CAddress::IsValid() const
     if (memcmp(pchReserved, pchIPv4+3, sizeof(pchIPv4)-3) == 0)
         return false;
 
-    return (ip != 0 && ip != INADDR_NONE && port != htons(USHRT_MAX));
+    return (ip != 0 && ip != INADDR_NONE && port != htons(std::numeric_limits<unsigned short>::max()));
 }
 
 unsigned char CAddress::GetByte(int n) const

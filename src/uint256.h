@@ -11,16 +11,8 @@
 #include <string>
 #include <vector>
 
-#if defined(_MSC_VER) || defined(__BORLANDC__)
-typedef __int64  int64;
-typedef unsigned __int64  uint64;
-#else
 typedef long long  int64;
 typedef unsigned long long  uint64;
-#endif
-#if defined(_MSC_VER) && _MSC_VER < 1300
-#define for  if (false) ; else for
-#endif
 
 
 inline int Testuint256AdHoc(std::vector<std::string> vArg);
@@ -364,19 +356,19 @@ public:
     }
 
 
-    unsigned int GetSerializeSize(int nType=0, int nVersion=VERSION) const
+    unsigned int GetSerializeSize(int nType=0, int nVersion=PROTOCOL_VERSION) const
     {
         return sizeof(pn);
     }
 
     template<typename Stream>
-    void Serialize(Stream& s, int nType=0, int nVersion=VERSION) const
+    void Serialize(Stream& s, int nType=0, int nVersion=PROTOCOL_VERSION) const
     {
         s.write((char*)pn, sizeof(pn));
     }
 
     template<typename Stream>
-    void Unserialize(Stream& s, int nType=0, int nVersion=VERSION)
+    void Unserialize(Stream& s, int nType=0, int nVersion=PROTOCOL_VERSION)
     {
         s.read((char*)pn, sizeof(pn));
     }
