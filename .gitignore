@@ -27,3 +27,4 @@ qrc_*.cpp
 #djp3 stuff
 deps/*
 src/djp3Makeit.sh
+Bitcoin-Qt.app/*
