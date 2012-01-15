@@ -860,12 +860,14 @@ int CWalletDB::LoadWallet(CWallet* pwallet)
                 {
                     CPrivKey pkey;
                     ssValue >> pkey;
+                    key.SetPubKey(vchPubKey);
                     key.SetPrivKey(pkey);
                 }
                 else
                 {
                     CWalletKey wkey;
                     ssValue >> wkey;
+                    key.SetPubKey(vchPubKey);
                     key.SetPrivKey(wkey.vchPrivKey);
                 }
                 if (!pwallet->LoadKey(key))
@@ -940,7 +942,7 @@ int CWalletDB::LoadWallet(CWallet* pwallet)
                 ssKey >> hash;
                 CScript script;
                 ssValue >> script;
-                if (!pwallet->LoadCScript(hash, script))
+                if (!pwallet->LoadCScript(script))
                     return DB_CORRUPT;
             }
         }
