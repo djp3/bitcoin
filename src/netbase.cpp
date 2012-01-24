@@ -98,7 +98,7 @@ bool LookupHostNumeric(const char *pszName, std::vector<CNetAddr>& vIP, int nMax
     return LookupHost(pszName, vIP, nMaxSolutions, false);
 }
 
-bool Lookup(const char *pszName, CService& addr, int portDefault, bool fAllowLookup)
+bool Lookup(const char *pszName, std::vector<CService>& vAddr, int portDefault, bool fAllowLookup, int nMaxSolutions)
 {
     if (pszName[0] == 0)
         return false;
@@ -132,10 +132,22 @@ bool Lookup(const char *pszName, CService& addr, int portDefault, bool fAllowLoo
     }
 
     std::vector<CNetAddr> vIP;
-    bool fRet = LookupIntern(pszHost, vIP, 1, fAllowLookup);
+    bool fRet = LookupIntern(pszHost, vIP, nMaxSolutions, fAllowLookup);
     if (!fRet)
         return false;
-    addr = CService(vIP[0], port);
+    vAddr.resize(vIP.size());
+    for (int i = 0; i < vIP.size(); i++)
+        vAddr[i] = CService(vIP[i], port);
+    return true;
+}
+
+bool Lookup(const char *pszName, CService& addr, int portDefault, bool fAllowLookup)
+{
+    std::vector<CService> vService;
+    bool fRet = Lookup(pszName, vService, portDefault, fAllowLookup, 1);
+    if (!fRet)
+        return false;
+    addr = vService[0];
     return true;
 }
 
@@ -615,11 +627,12 @@ CService::CService(const char *pszIpPort, bool fAllowLookup)
         *this = ip;
 }
 
-CService::CService(const char *pszIp, int portIn, bool fAllowLookup)
+CService::CService(const char *pszIpPort, int portDefault, bool fAllowLookup)
 {
-    std::vector<CNetAddr> ip;
-    if (LookupHost(pszIp, ip, 1, fAllowLookup))
-        *this = CService(ip[0], portIn);
+    Init();
+    CService ip;
+    if (Lookup(pszIpPort, ip, portDefault, fAllowLookup))
+        *this = ip;
 }
 
 CService::CService(const std::string &strIpPort, bool fAllowLookup)
@@ -630,11 +643,12 @@ CService::CService(const std::string &strIpPort, bool fAllowLookup)
         *this = ip;
 }
 
-CService::CService(const std::string &strIp, int portIn, bool fAllowLookup)
+CService::CService(const std::string &strIpPort, int portDefault, bool fAllowLookup)
 {
-    std::vector<CNetAddr> ip;
-    if (LookupHost(strIp.c_str(), ip, 1, fAllowLookup))
-        *this = CService(ip[0], portIn);
+    Init();
+    CService ip;
+    if (Lookup(strIpPort.c_str(), ip, portDefault, fAllowLookup))
+        *this = ip;
 }
 
 unsigned short CService::GetPort() const
