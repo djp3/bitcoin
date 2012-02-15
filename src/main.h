@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2011 The Bitcoin developers
+// Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file license.txt or http://www.opensource.org/licenses/mit-license.php.
 #ifndef BITCOIN_MAIN_H
@@ -26,7 +26,7 @@ class CInv;
 class CRequestTracker;
 class CNode;
 
-static const int CLIENT_VERSION = 59900;
+static const int CLIENT_VERSION = 60000;
 static const bool VERSION_IS_BETA = true;
 extern const std::string CLIENT_NAME;
 
@@ -49,10 +49,7 @@ static const int fHaveUPnP = false;
 #endif
 
 
-// Put "/P2SH/" in the coinbase so everybody can tell when
-// a majority of miners support it
-static const char* pszP2SH = "/P2SH/";
-static const CScript COINBASE_FLAGS = CScript() << std::vector<unsigned char>(pszP2SH, pszP2SH+strlen(pszP2SH));
+extern CScript COINBASE_FLAGS;
 
 
 

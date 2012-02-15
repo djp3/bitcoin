@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2011 The Bitcoin developers
+// Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file license.txt or http://www.opensource.org/licenses/mit-license.php.
 #include "headers.h"
@@ -52,6 +52,8 @@ multimap<uint256, CBlock*> mapOrphanBlocksByPrev;
 map<uint256, CDataStream*> mapOrphanTransactions;
 multimap<uint256, CDataStream*> mapOrphanTransactionsByPrev;
 
+// Constant stuff for coinbase transactions we create:
+CScript COINBASE_FLAGS;
 
 const string strMessageMagic = "Bitcoin Signed Message:\n";
 
@@ -293,18 +295,33 @@ bool CTransaction::AreInputsStandard(const MapPrevTx& mapInputs) const
         const CScript& prevScript = prev.scriptPubKey;
         if (!Solver(prevScript, whichType, vSolutions))
             return false;
+        int nArgsExpected = ScriptSigArgsExpected(whichType, vSolutions);
+
+        // Transactions with extra stuff in their scriptSigs are
+        // non-standard. Note that this EvalScript() call will
+        // be quick, because if there are any operations
+        // beside "push data" in the scriptSig the
+        // IsStandard() call returns false
+        vector<vector<unsigned char> > stack;
+        if (!EvalScript(stack, vin[i].scriptSig, *this, i, 0))
+            return false;
+
         if (whichType == TX_SCRIPTHASH)
         {
-            vector<vector<unsigned char> > stack;
-
-            if (!EvalScript(stack, vin[i].scriptSig, *this, i, 0))
-                return false;
             if (stack.empty())
                 return false;
             CScript subscript(stack.back().begin(), stack.back().end());
-            if (!::IsStandard(subscript))
+            vector<vector<unsigned char> > vSolutions2;
+            txnouttype whichType2;
+            if (!Solver(subscript, whichType2, vSolutions2))
                 return false;
+            if (whichType2 == TX_SCRIPTHASH)
+                return false;
+            nArgsExpected += ScriptSigArgsExpected(whichType2, vSolutions2);
         }
+
+        if (stack.size() != nArgsExpected)
+            return false;
     }
 
     return true;
@@ -601,11 +618,15 @@ bool CTransaction::RemoveFromMemoryPool()
     // Remove transaction from memory pool
     CRITICAL_BLOCK(cs_mapTransactions)
     {
-        BOOST_FOREACH(const CTxIn& txin, vin)
-            mapNextTx.erase(txin.prevout);
-        mapTransactions.erase(GetHash());
-        nTransactionsUpdated++;
-        --nPooledTx;
+        uint256 hash = GetHash();
+        if (mapTransactions.count(hash))
+        {
+            BOOST_FOREACH(const CTxIn& txin, vin)
+                mapNextTx.erase(txin.prevout);
+            mapTransactions.erase(hash);
+            nTransactionsUpdated++;
+            --nPooledTx;
+        }
     }
     return true;
 }
@@ -1213,8 +1234,9 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex)
 
     // To avoid being on the short end of a block-chain split,
     // don't do secondary validation of pay-to-script-hash transactions
-    // until blocks with timestamps after paytoscripthashtime:
-    int64 nEvalSwitchTime = GetArg("-paytoscripthashtime", 1329264000); // Feb 15, 2012
+    // until blocks with timestamps after paytoscripthashtime (see init.cpp for default).
+    // This code can be removed once a super-majority of the network has upgraded.
+    int64 nEvalSwitchTime = GetArg("-paytoscripthashtime", std::numeric_limits<int64_t>::max());
     bool fStrictPayToScriptHash = (pindex->nTime >= nEvalSwitchTime);
 
     //// issue here: it doesn't know the version
@@ -2107,7 +2129,8 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         if (!pfrom->fInbound)
         {
             // Advertise our address
-            if (addrLocalHost.IsRoutable() && !fUseProxy)
+            if (!fNoListen && !fUseProxy && addrLocalHost.IsRoutable() &&
+                !IsInitialBlockDownload())
             {
                 CAddress addr(addrLocalHost);
                 addr.nTime = GetAdjustedTime();
@@ -2703,18 +2726,18 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
 
         // Address refresh broadcast
         static int64 nLastRebroadcast;
-        if (GetTime() - nLastRebroadcast > 24 * 60 * 60)
+        if (!IsInitialBlockDownload() && (GetTime() - nLastRebroadcast > 24 * 60 * 60))
         {
-            nLastRebroadcast = GetTime();
             CRITICAL_BLOCK(cs_vNodes)
             {
                 BOOST_FOREACH(CNode* pnode, vNodes)
                 {
                     // Periodically clear setAddrKnown to allow refresh broadcasts
-                    pnode->setAddrKnown.clear();
+                    if (nLastRebroadcast)
+                        pnode->setAddrKnown.clear();
 
                     // Rebroadcast our address
-                    if (addrLocalHost.IsRoutable() && !fUseProxy)
+                    if (!fNoListen && !fUseProxy && addrLocalHost.IsRoutable())
                     {
                         CAddress addr(addrLocalHost);
                         addr.nTime = GetAdjustedTime();
@@ -2722,6 +2745,7 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
                     }
                 }
             }
+            nLastRebroadcast = GetTime();
         }
 
         // Clear out old addresses periodically so it's not too much work at once

@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2011 The Bitcoin developers
+// Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file license.txt or http://www.opensource.org/licenses/mit-license.php.
 
@@ -192,7 +192,7 @@ bool CCryptoKeyStore::EncryptKeys(CKeyingMaterial& vMasterKeyIn)
         BOOST_FOREACH(KeyMap::value_type& mKey, mapKeys)
         {
             CKey key;
-            if (!key.SetSecret(mKey.second.first, false))
+            if (!key.SetSecret(mKey.second.first, mKey.second.second))
                 return false;
             const std::vector<unsigned char> vchPubKey = key.GetPubKey();
             std::vector<unsigned char> vchCryptedSecret;

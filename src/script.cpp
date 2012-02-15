@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2011 The Bitcoin developers
+// Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file license.txt or http://www.opensource.org/licenses/mit-license.php.
 #include "headers.h"
@@ -1312,6 +1312,25 @@ bool Solver(const CKeyStore& keystore, const CScript& scriptPubKey, uint256 hash
     return false;
 }
 
+int ScriptSigArgsExpected(txnouttype t, const std::vector<std::vector<unsigned char> >& vSolutions)
+{
+    switch (t)
+    {
+    case TX_NONSTANDARD:
+        return -1;
+    case TX_PUBKEY:
+        return 1;
+    case TX_PUBKEYHASH:
+        return 2;
+    case TX_MULTISIG:
+        if (vSolutions.size() < 1 || vSolutions[0].size() < 1)
+            return -1;
+        return vSolutions[0][0] + 1;
+    case TX_SCRIPTHASH:
+        return 1; // doesn't include args needed by the script
+    }
+    return -1;
+}
 
 bool IsStandard(const CScript& scriptPubKey)
 {

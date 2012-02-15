@@ -1,6 +1,6 @@
 TEMPLATE = app
 TARGET =
-VERSION = 0.5.99
+VERSION = 0.6.0
 INCLUDEPATH += src src/json src/qt
 DEFINES += QT_GUI BOOST_THREAD_USE_LIB
 CONFIG += no_include_pwd
@@ -76,7 +76,7 @@ contains(FIRST_CLASS_MESSAGING, 1) {
 
 contains(BITCOIN_NEED_QT_PLUGINS, 1) {
     DEFINES += BITCOIN_NEED_QT_PLUGINS
-    QTPLUGIN += qcncodecs qjpcodecs qtwcodecs qkrcodecs
+    QTPLUGIN += qcncodecs qjpcodecs qtwcodecs qkrcodecs qtaccessiblewidgets
 }
 
 !windows {
@@ -224,6 +224,16 @@ contains(USE_QRCODE, 1) {
 HEADERS += src/qt/qrcodedialog.h
 SOURCES += src/qt/qrcodedialog.cpp
 FORMS += src/qt/forms/qrcodedialog.ui
+}
+
+contains(BITCOIN_QT_TEST, 1) {
+SOURCES += src/qt/test/test_main.cpp \
+    src/qt/test/urltests.cpp
+HEADERS += src/qt/test/urltests.h
+DEPENDPATH += src/qt/test
+QT += testlib
+TARGET = bitcoin-qt_test
+DEFINES += BITCOIN_QT_TEST
 }
 
 CODECFORTR = UTF-8

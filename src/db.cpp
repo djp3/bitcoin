@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2011 The Bitcoin developers
+// Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file license.txt or http://www.opensource.org/licenses/mit-license.php.
 
@@ -990,7 +990,7 @@ void ThreadFlushWalletDB(void* parg)
     if (fOneThread)
         return;
     fOneThread = true;
-    if (mapArgs.count("-noflushwallet"))
+    if (!GetBoolArg("-flushwallet", true))
         return;
 
     unsigned int nLastSeen = nWalletDBUpdated;
