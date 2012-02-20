@@ -466,7 +466,7 @@ Value getinfo(const Array& params, bool fHelp)
     obj.push_back(Pair("keypoolsize",   pwalletMain->GetKeyPoolSize()));
     obj.push_back(Pair("paytxfee",      ValueFromAmount(nTransactionFee)));
     if (pwalletMain->IsCrypted())
-        obj.push_back(Pair("unlocked_until", (boost::int64_t)nWalletUnlockTime));
+        obj.push_back(Pair("unlocked_until", (boost::int64_t)nWalletUnlockTime / 1000));
     obj.push_back(Pair("errors",        GetWarnings("statusbar")));
     return obj;
 }
@@ -1650,35 +1650,41 @@ void ThreadTopUpKeyPool(void* parg)
 
 void ThreadCleanWalletPassphrase(void* parg)
 {
-    int64 nMyWakeTime = GetTime() + *((int*)parg);
+    int64 nMyWakeTime = GetTimeMillis() + *((int*)parg) * 1000;
+
+    ENTER_CRITICAL_SECTION(cs_nWalletUnlockTime);
 
     if (nWalletUnlockTime == 0)
     {
-        CRITICAL_BLOCK(cs_nWalletUnlockTime)
+        nWalletUnlockTime = nMyWakeTime;
+
+        do
         {
-            nWalletUnlockTime = nMyWakeTime;
-        }
+            if (nWalletUnlockTime==0)
+                break;
+            int64 nToSleep = nWalletUnlockTime - GetTimeMillis();
+            if (nToSleep <= 0)
+                break;
 
-        while (GetTime() < nWalletUnlockTime)
-            Sleep(GetTime() - nWalletUnlockTime);
+            LEAVE_CRITICAL_SECTION(cs_nWalletUnlockTime);
+            Sleep(nToSleep);
+            ENTER_CRITICAL_SECTION(cs_nWalletUnlockTime);
 
-        CRITICAL_BLOCK(cs_nWalletUnlockTime)
+        } while(1);
+
+        if (nWalletUnlockTime)
         {
             nWalletUnlockTime = 0;
+            pwalletMain->Lock();
         }
     }
     else
     {
-        CRITICAL_BLOCK(cs_nWalletUnlockTime)
-        {
-            if (nWalletUnlockTime < nMyWakeTime)
-                nWalletUnlockTime = nMyWakeTime;
-        }
-        delete (int*)parg;
-        return;
+        if (nWalletUnlockTime < nMyWakeTime)
+            nWalletUnlockTime = nMyWakeTime;
     }
 
-    pwalletMain->Lock();
+    LEAVE_CRITICAL_SECTION(cs_nWalletUnlockTime);
 
     delete (int*)parg;
 }
@@ -1768,9 +1774,9 @@ Value walletlock(const Array& params, bool fHelp)
     if (!pwalletMain->IsCrypted())
         throw JSONRPCError(-15, "Error: running with an unencrypted wallet, but walletlock was called.");
 
-    pwalletMain->Lock();
     CRITICAL_BLOCK(cs_nWalletUnlockTime)
     {
+        pwalletMain->Lock();
         nWalletUnlockTime = 0;
     }
 
@@ -1923,7 +1929,7 @@ Value getwork(const Array& params, bool fHelp)
         }
 
         // Update nTime
-        pblock->nTime = max(pindexPrev->GetMedianTimePast()+1, GetAdjustedTime());
+        pblock->UpdateTime(pindexPrev);
         pblock->nNonce = 0;
 
         // Update nExtraNonce
@@ -2023,7 +2029,7 @@ Value getmemorypool(const Array& params, bool fHelp)
         }
 
         // Update nTime
-        pblock->nTime = max(pindexPrev->GetMedianTimePast()+1, GetAdjustedTime());
+        pblock->UpdateTime(pindexPrev);
         pblock->nNonce = 0;
 
         Array transactions;
@@ -2463,15 +2469,15 @@ void ThreadRPCServer(void* parg)
     IMPLEMENT_RANDOMIZE_STACK(ThreadRPCServer(parg));
     try
     {
-        vnThreadsRunning[4]++;
+        vnThreadsRunning[THREAD_RPCSERVER]++;
         ThreadRPCServer2(parg);
-        vnThreadsRunning[4]--;
+        vnThreadsRunning[THREAD_RPCSERVER]--;
     }
     catch (std::exception& e) {
-        vnThreadsRunning[4]--;
+        vnThreadsRunning[THREAD_RPCSERVER]--;
         PrintException(&e, "ThreadRPCServer()");
     } catch (...) {
-        vnThreadsRunning[4]--;
+        vnThreadsRunning[THREAD_RPCSERVER]--;
         PrintException(NULL, "ThreadRPCServer()");
     }
     printf("ThreadRPCServer exiting\n");
@@ -2551,7 +2557,7 @@ void ThreadRPCServer2(void* parg)
 #endif
 
         ip::tcp::endpoint peer;
-        vnThreadsRunning[4]--;
+        vnThreadsRunning[THREAD_RPCSERVER]--;
 #ifdef USE_SSL
         acceptor.accept(sslStream.lowest_layer(), peer);
 #else

@@ -197,6 +197,9 @@ bool AppInit2(int argc, char* argv[])
             "  -connect=<ip>    \t\t  " + _("Connect only to the specified node") + "\n" +
             "  -irc             \t  "   + _("Find peers using internet relay chat (default: 0)") + "\n" +
             "  -listen          \t  "   + _("Accept connections from outside (default: 1)") + "\n" +
+#ifdef QT_GUI
+            "  -lang=<lang>     \t\t  " + _("Set language, for example \"de_DE\" (default: system locale)") + "\n" +
+#endif
             "  -dnsseed         \t  "   + _("Find peers using DNS lookup (default: 1)") + "\n" +
             "  -banscore=<n>    \t  "   + _("Threshold for disconnecting misbehaving peers (default: 100)") + "\n" +
             "  -bantime=<n>     \t  "   + _("Number of seconds to keep misbehaving peers from reconnecting (default: 86400)") + "\n" +
@@ -210,10 +213,10 @@ bool AppInit2(int argc, char* argv[])
 #endif
 #endif
             "  -paytxfee=<amt>  \t  "   + _("Fee per KB to add to transactions you send") + "\n" +
-#ifdef GUI
+#ifdef QT_GUI
             "  -server          \t\t  " + _("Accept command line and JSON-RPC commands") + "\n" +
 #endif
-#ifndef WIN32
+#if !defined(WIN32) && !defined(QT_GUI)
             "  -daemon          \t\t  " + _("Run in the background as a daemon and accept commands") + "\n" +
 #endif
             "  -testnet         \t\t  " + _("Use the test network") + "\n" +
@@ -246,14 +249,19 @@ bool AppInit2(int argc, char* argv[])
 
         // Remove tabs
         strUsage.erase(std::remove(strUsage.begin(), strUsage.end(), '\t'), strUsage.end());
+#if defined(QT_GUI) && defined(WIN32)
+        // On windows, show a message box, as there is no stderr
+        wxMessageBox(strUsage, "Usage");
+#else
         fprintf(stderr, "%s", strUsage.c_str());
+#endif
         return false;
     }
 
     fTestNet = GetBoolArg("-testnet");
     fDebug = GetBoolArg("-debug");
 
-#ifndef WIN32
+#if !defined(WIN32) && !defined(QT_GUI)
     fDaemon = GetBoolArg("-daemon");
 #else
     fDaemon = false;
@@ -284,7 +292,7 @@ bool AppInit2(int argc, char* argv[])
     }
 #endif
 
-#ifndef WIN32
+#if !defined(WIN32) && !defined(QT_GUI)
     if (fDaemon)
     {
         // Daemonize

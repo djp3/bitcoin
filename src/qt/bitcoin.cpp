@@ -27,18 +27,10 @@ QSplashScreen *splashref;
 
 int MyMessageBox(const std::string& message, const std::string& caption, int style, wxWindow* parent, int x, int y)
 {
-    // Message from main thread
-    if(guiref)
-    {
-        guiref->error(QString::fromStdString(caption),
-                      QString::fromStdString(message));
-    }
-    else
-    {
-        QMessageBox::critical(0, QString::fromStdString(caption),
-            QString::fromStdString(message),
-            QMessageBox::Ok, QMessageBox::Ok);
-    }
+    // Message from AppInit2(), always in main thread before main window is constructed
+    QMessageBox::critical(0, QString::fromStdString(caption),
+        QString::fromStdString(message),
+        QMessageBox::Ok, QMessageBox::Ok);
     return 4;
 }
 
@@ -162,11 +154,13 @@ int main(int argc, char *argv[])
 
     ParseParameters(argc, argv);
 
-    // Load language files for system locale:
+    // Get desired locale ("en_US") from command line or system locale
+    QString lang_territory = QString::fromStdString(GetArg("-lang", QLocale::system().name().toStdString()));
+    // Load language files for configured locale:
     // - First load the translator for the base language, without territory
     // - Then load the more specific locale translator
-    QString lang_territory = QLocale::system().name(); // "en_US"
     QString lang = lang_territory;
+
     lang.truncate(lang_territory.lastIndexOf('_')); // "en"
     QTranslator qtTranslatorBase, qtTranslator, translatorBase, translator;
 
