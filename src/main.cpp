@@ -21,7 +21,7 @@ using namespace boost;
 // Name of client reported in the 'version' message. Report the same name
 // for both bitcoind and bitcoin-qt, to make it harder for attackers to
 // target servers or GUI users specifically.
-const std::string CLIENT_NAME("bitcoin-qt");
+const std::string CLIENT_NAME("Satoshi");
 
 CCriticalSection cs_setpwalletRegistered;
 set<CWallet*> setpwalletRegistered;
@@ -57,22 +57,12 @@ CScript COINBASE_FLAGS;
 
 const string strMessageMagic = "Bitcoin Signed Message:\n";
 
-
 double dHashesPerSec;
 int64 nHPSTimerStart;
 
 // Settings
-int fGenerateBitcoins = false;
 int64 nTransactionFee = 0;
-int fLimitProcessors = false;
-int nLimitProcessors = 1;
-int fMinimizeToTray = true;
-int fMinimizeOnClose = true;
-#if USE_UPNP
-int fUseUPnP = true;
-#else
-int fUseUPnP = false;
-#endif
+
 
 
 //////////////////////////////////////////////////////////////////////////////
@@ -177,13 +167,14 @@ void static ResendWalletTransactions()
 // mapOrphanTransactions
 //
 
-void static AddOrphanTx(const CDataStream& vMsg)
+void AddOrphanTx(const CDataStream& vMsg)
 {
     CTransaction tx;
     CDataStream(vMsg) >> tx;
     uint256 hash = tx.GetHash();
     if (mapOrphanTransactions.count(hash))
         return;
+
     CDataStream* pvMsg = mapOrphanTransactions[hash] = new CDataStream(vMsg);
     BOOST_FOREACH(const CTxIn& txin, tx.vin)
         mapOrphanTransactionsByPrev.insert(make_pair(txin.prevout.hash, pvMsg));
@@ -211,6 +202,23 @@ void static EraseOrphanTx(uint256 hash)
     mapOrphanTransactions.erase(hash);
 }
 
+int LimitOrphanTxSize(int nMaxOrphans)
+{
+    int nEvicted = 0;
+    while (mapOrphanTransactions.size() > nMaxOrphans)
+    {
+        // Evict a random orphan:
+        std::vector<unsigned char> randbytes(32);
+        RAND_bytes(&randbytes[0], 32);
+        uint256 randomhash(randbytes);
+        map<uint256, CDataStream*>::iterator it = mapOrphanTransactions.lower_bound(randomhash);
+        if (it == mapOrphanTransactions.end())
+            it = mapOrphanTransactions.begin();
+        EraseOrphanTx(it->first);
+        ++nEvicted;
+    }
+    return nEvicted;
+}
 
 
 
@@ -1138,7 +1146,14 @@ bool CTransaction::ConnectInputs(MapPrevTx inputs,
             {
                 // Verify signature
                 if (!VerifySignature(txPrev, *this, i, fStrictPayToScriptHash, 0))
+                {
+                    // only during transition phase for P2SH: do not invoke anti-DoS code for
+                    // potentially old clients relaying bad P2SH transactions
+                    if (fStrictPayToScriptHash && VerifySignature(txPrev, *this, i, false, 0))
+                        return error("ConnectInputs() : %s P2SH VerifySignature failed", GetHash().ToString().substr(0,10).c_str());
+
                     return DoS(100,error("ConnectInputs() : %s VerifySignature failed", GetHash().ToString().substr(0,10).c_str()));
+                }
             }
 
             // Mark outpoints as spent
@@ -1405,6 +1420,9 @@ bool static Reorganize(CTxDB& txdb, CBlockIndex* pindexNew)
     BOOST_FOREACH(CTransaction& tx, vDelete)
         tx.RemoveFromMemoryPool();
 
+    printf("REORGANIZE: Disconnected %i blocks; %s..%s\n", vDisconnect.size(), pfork->GetBlockHash().ToString().substr(0,20).c_str(), pindexBest->GetBlockHash().ToString().substr(0,20).c_str());
+    printf("REORGANIZE: Connected %i blocks; %s..%s\n", vConnect.size(), pfork->GetBlockHash().ToString().substr(0,20).c_str(), pindexNew->GetBlockHash().ToString().substr(0,20).c_str());
+
     return true;
 }
 
@@ -1652,7 +1670,8 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
         int64 deltaTime = pblock->GetBlockTime() - pcheckpoint->nTime;
         if (deltaTime < 0)
         {
-            pfrom->Misbehaving(100);
+            if (pfrom)
+                pfrom->Misbehaving(100);
             return error("ProcessBlock() : block with timestamp before last checkpoint");
         }
         CBigNum bnNewBlock;
@@ -1661,7 +1680,8 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
         bnRequired.SetCompact(ComputeMinWork(pcheckpoint->nBits, deltaTime));
         if (bnNewBlock > bnRequired)
         {
-            pfrom->Misbehaving(100);
+            if (pfrom)
+                pfrom->Misbehaving(100);
             return error("ProcessBlock() : block with too little proof-of-work");
         }
     }
@@ -2100,17 +2120,23 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         CAddress addrFrom;
         uint64 nNonce = 1;
         vRecv >> pfrom->nVersion >> pfrom->nServices >> nTime >> addrMe;
+        if (pfrom->nVersion < 209)
+        {
+            // Since February 20, 2012, the protocol is initiated at version 209,
+            // and earlier versions are no longer supported
+            printf("partner %s using obsolete version %i; disconnecting\n", pfrom->addr.ToString().c_str(), pfrom->nVersion);
+            pfrom->fDisconnect = true;
+            return false;
+        }
+
         if (pfrom->nVersion == 10300)
             pfrom->nVersion = 300;
-        if (pfrom->nVersion >= 106 && !vRecv.empty())
+        if (!vRecv.empty())
             vRecv >> addrFrom >> nNonce;
-        if (pfrom->nVersion >= 106 && !vRecv.empty())
+        if (!vRecv.empty())
             vRecv >> pfrom->strSubVer;
-        if (pfrom->nVersion >= 209 && !vRecv.empty())
+        if (!vRecv.empty())
             vRecv >> pfrom->nStartingHeight;
-
-        if (pfrom->nVersion == 0)
-            return false;
 
         // Disconnect if we connected to ourself
         if (nNonce == nLocalHostNonce && nNonce > 1)
@@ -2129,11 +2155,8 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         AddTimeData(pfrom->addr, nTime);
 
         // Change version
-        if (pfrom->nVersion >= 209)
-            pfrom->PushMessage("verack");
+        pfrom->PushMessage("verack");
         pfrom->vSend.SetVersion(min(pfrom->nVersion, PROTOCOL_VERSION));
-        if (pfrom->nVersion < 209)
-            pfrom->vRecv.SetVersion(min(pfrom->nVersion, PROTOCOL_VERSION));
 
         if (!pfrom->fInbound)
         {
@@ -2197,8 +2220,6 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         vRecv >> vAddr;
 
         // Don't want addr from older versions unless seeding
-        if (pfrom->nVersion < 209)
-            return true;
         if (pfrom->nVersion < 31402 && mapAddresses.size() > 1000)
             return true;
         if (vAddr.size() > 1000)
@@ -2470,6 +2491,11 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         {
             printf("storing orphan tx %s\n", inv.hash.ToString().substr(0,10).c_str());
             AddOrphanTx(vMsg);
+
+            // DoS prevention: do not allow mapOrphanTransactions to grow unbounded
+            int nEvicted = LimitOrphanTxSize(MAX_ORPHAN_TRANSACTIONS);
+            if (nEvicted > 0)
+                printf("mapOrphan overflow, removed %d tx\n", nEvicted);
         }
         if (tx.nDoS) pfrom->Misbehaving(tx.nDoS);
     }
@@ -2660,17 +2686,14 @@ bool ProcessMessages(CNode* pfrom)
         }
 
         // Checksum
-        if (vRecv.GetVersion() >= 209)
+        uint256 hash = Hash(vRecv.begin(), vRecv.begin() + nMessageSize);
+        unsigned int nChecksum = 0;
+        memcpy(&nChecksum, &hash, sizeof(nChecksum));
+        if (nChecksum != hdr.nChecksum)
         {
-            uint256 hash = Hash(vRecv.begin(), vRecv.begin() + nMessageSize);
-            unsigned int nChecksum = 0;
-            memcpy(&nChecksum, &hash, sizeof(nChecksum));
-            if (nChecksum != hdr.nChecksum)
-            {
-                printf("ProcessMessage(%s, %u bytes) : CHECKSUM ERROR nChecksum=%08x hdr.nChecksum=%08x\n",
-                       strCommand.c_str(), nMessageSize, nChecksum, hdr.nChecksum);
-                continue;
-            }
+            printf("ProcessMessage(%s, %u bytes) : CHECKSUM ERROR nChecksum=%08x hdr.nChecksum=%08x\n",
+               strCommand.c_str(), nMessageSize, nChecksum, hdr.nChecksum);
+            continue;
         }
 
         // Copy message to its own buffer
@@ -3286,6 +3309,10 @@ bool CheckWork(CBlock* pblock, CWallet& wallet, CReserveKey& reservekey)
 
 void static ThreadBitcoinMiner(void* parg);
 
+static bool fGenerateBitcoins = false;
+static bool fLimitProcessors = false;
+static int nLimitProcessors = -1;
+
 void static BitcoinMiner(CWallet *pwallet)
 {
     printf("BitcoinMiner started\n");
@@ -3461,13 +3488,13 @@ void static ThreadBitcoinMiner(void* parg)
 
 void GenerateBitcoins(bool fGenerate, CWallet* pwallet)
 {
-    if (fGenerateBitcoins != fGenerate)
-    {
-        fGenerateBitcoins = fGenerate;
-        WriteSetting("fGenerateBitcoins", fGenerateBitcoins);
-        MainFrameRepaint();
-    }
-    if (fGenerateBitcoins)
+    fGenerateBitcoins = fGenerate;
+    nLimitProcessors = GetArg("-genproclimit", -1);
+    if (nLimitProcessors == 0)
+        fGenerateBitcoins = false;
+    fLimitProcessors = (nLimitProcessors != -1);
+
+    if (fGenerate)
     {
         int nProcessors = boost::thread::hardware_concurrency();
         printf("%d processors\n", nProcessors);

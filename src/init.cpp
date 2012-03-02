@@ -150,27 +150,15 @@ bool AppInit2(int argc, char* argv[])
     //
     // Parameters
     //
-    // If Qt is used, parameters are parsed in qt/bitcoin.cpp's main()
+    // If Qt is used, parameters/bitcoin.conf are parsed in qt/bitcoin.cpp's main()
 #if !defined(QT_GUI)
     ParseParameters(argc, argv);
-#endif
-
-    if (mapArgs.count("-datadir"))
+    if (!ReadConfigFile(mapArgs, mapMultiArgs))
     {
-        if (filesystem::is_directory(filesystem::system_complete(mapArgs["-datadir"])))
-        {
-            filesystem::path pathDataDir = filesystem::system_complete(mapArgs["-datadir"]);
-            strlcpy(pszSetDataDir, pathDataDir.string().c_str(), sizeof(pszSetDataDir));
-        }
-        else
-        {
-            fprintf(stderr, "Error: Specified directory does not exist\n");
-            Shutdown(NULL);
-        }
+        fprintf(stderr, "Error: Specified directory does not exist\n");
+        Shutdown(NULL);
     }
-
-
-    ReadConfigFile(mapArgs, mapMultiArgs); // Must be done after processing datadir
+#endif
 
     if (mapArgs.count("-?") || mapArgs.count("--help"))
     {
@@ -187,6 +175,7 @@ bool AppInit2(int argc, char* argv[])
             "  -gen             \t\t  " + _("Generate coins") + "\n" +
             "  -gen=0           \t\t  " + _("Don't generate coins") + "\n" +
             "  -min             \t\t  " + _("Start minimized") + "\n" +
+            "  -splash          \t\t  " + _("Show splash screen on startup (default: 1)") + "\n" +
             "  -datadir=<dir>   \t\t  " + _("Specify data directory") + "\n" +
             "  -timeout=<n>     \t  "   + _("Specify connection timeout (in milliseconds)") + "\n" +
             "  -proxy=<ip:port> \t  "   + _("Connect through socks4 proxy") + "\n" +
@@ -259,6 +248,11 @@ bool AppInit2(int argc, char* argv[])
     }
 
     fTestNet = GetBoolArg("-testnet");
+    if (fTestNet)
+    {
+        SoftSetBoolArg("-irc", true);
+    }
+
     fDebug = GetBoolArg("-debug");
 
 #if !defined(WIN32) && !defined(QT_GUI)
@@ -467,8 +461,6 @@ bool AppInit2(int argc, char* argv[])
         return false;
     }
 
-    fGenerateBitcoins = GetBoolArg("-gen");
-
     if (mapArgs.count("-proxy"))
     {
         fUseProxy = true;
@@ -501,7 +493,7 @@ bool AppInit2(int argc, char* argv[])
         if (fTestNet)
             SoftSetArg("-paytoscripthashtime", "1329264000"); // Feb 15
         else
-            SoftSetArg("-paytoscripthashtime", "1330578000"); // Mar 1
+            SoftSetArg("-paytoscripthashtime", "1333238400"); // April 1 2012
 
         // Put "/P2SH/" in the coinbase so everybody can tell when
         // a majority of miners support it
@@ -513,13 +505,6 @@ bool AppInit2(int argc, char* argv[])
         const char* pszP2SH = "NOP2SH";
         COINBASE_FLAGS << std::vector<unsigned char>(pszP2SH, pszP2SH+strlen(pszP2SH));
     }
-
-    // Command-line args override in-wallet settings:
-#if USE_UPNP
-    fUseUPnP = GetBoolArg("-upnp", true);
-#else
-    fUseUPnP = GetBoolArg("-upnp", false);
-#endif
 
     if (!fNoListen)
     {

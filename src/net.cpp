@@ -43,6 +43,7 @@ bool OpenNetworkConnection(const CAddress& addrConnect);
 //
 bool fClient = false;
 bool fAllowDNS = false;
+static bool fUseUPnP = false;
 uint64 nLocalServices = (fClient ? 0 : NODE_NETWORK);
 CAddress addrLocalHost(CService("0.0.0.0", 0), nLocalServices);
 static CNode* pnodeLocalHost = NULL;
@@ -82,6 +83,57 @@ void CNode::PushGetBlocks(CBlockIndex* pindexBegin, uint256 hashEnd)
 }
 
 
+
+bool RecvLine(SOCKET hSocket, string& strLine)
+{
+    strLine = "";
+    loop
+    {
+        char c;
+        int nBytes = recv(hSocket, &c, 1, 0);
+        if (nBytes > 0)
+        {
+            if (c == '\n')
+                continue;
+            if (c == '\r')
+                return true;
+            strLine += c;
+            if (strLine.size() >= 9000)
+                return true;
+        }
+        else if (nBytes <= 0)
+        {
+            if (fShutdown)
+                return false;
+            if (nBytes < 0)
+            {
+                int nErr = WSAGetLastError();
+                if (nErr == WSAEMSGSIZE)
+                    continue;
+                if (nErr == WSAEWOULDBLOCK || nErr == WSAEINTR || nErr == WSAEINPROGRESS)
+                {
+                    Sleep(10);
+                    continue;
+                }
+            }
+            if (!strLine.empty())
+                return true;
+            if (nBytes == 0)
+            {
+                // socket closed
+                printf("socket closed\n");
+                return false;
+            }
+            else
+            {
+                // socket error
+                int nErr = WSAGetLastError();
+                printf("recv failed: %d\n", nErr);
+                return false;
+            }
+        }
+    }
+}
 
 
 
@@ -1051,7 +1103,6 @@ void MapPort(bool fMapPort)
     if (fUseUPnP != fMapPort)
     {
         fUseUPnP = fMapPort;
-        WriteSetting("fUseUPnP", fUseUPnP);
     }
     if (fUseUPnP && vnThreadsRunning[THREAD_UPNP] < 1)
     {
@@ -1660,6 +1711,14 @@ bool BindListenPort(string& strError)
 
 void StartNode(void* parg)
 {
+#ifdef USE_UPNP
+#if USE_UPNP
+    fUseUPnP = GetBoolArg("-upnp", true);
+#else
+    fUseUPnP = GetBoolArg("-upnp", false);
+#endif
+#endif
+
     if (pnodeLocalHost == NULL)
         pnodeLocalHost = new CNode(INVALID_SOCKET, CAddress(CService("127.0.0.1", 0), nLocalServices));
 
@@ -1761,7 +1820,7 @@ void StartNode(void* parg)
         printf("Error: CreateThread(ThreadMessageHandler) failed\n");
 
     // Generate coins in the background
-    GenerateBitcoins(fGenerateBitcoins, pwalletMain);
+    GenerateBitcoins(GetBoolArg("-gen", false), pwalletMain);
 }
 
 bool StopNode()

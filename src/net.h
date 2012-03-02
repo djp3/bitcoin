@@ -14,6 +14,7 @@
 #include <arpa/inet.h>
 #endif
 
+#include "mruset.h"
 #include "netbase.h"
 #include "protocol.h"
 
@@ -29,6 +30,7 @@ inline unsigned int ReceiveBufferSize() { return 1000*GetArg("-maxreceivebuffer"
 inline unsigned int SendBufferSize() { return 1000*GetArg("-maxsendbuffer", 10*1000); }
 static const unsigned int PUBLISH_HOPS = 5;
 
+bool RecvLine(SOCKET hSocket, std::string& strLine);
 bool GetMyExternalIP(CNetAddr& ipRet);
 bool AddAddress(CAddress addr, int64 nTimePenalty=0, CAddrDB *pAddrDB=NULL);
 void AddressCurrentlyConnected(const CService& addr);
@@ -153,7 +155,7 @@ public:
     std::set<uint256> setKnown;
 
     // inventory based relay
-    std::set<CInv> setInventoryKnown;
+    mruset<CInv> setInventoryKnown;
     std::vector<CInv> vInventoryToSend;
     CCriticalSection cs_inventory;
     std::multimap<int64, CInv> mapAskFor;
@@ -166,15 +168,9 @@ public:
         nServices = 0;
         hSocket = hSocketIn;
         vSend.SetType(SER_NETWORK);
-        vSend.SetVersion(0);
         vRecv.SetType(SER_NETWORK);
-        vRecv.SetVersion(0);
-        // Version 0.2 obsoletes 20 Feb 2012
-        if (GetTime() > 1329696000)
-        {
-            vSend.SetVersion(209);
-            vRecv.SetVersion(209);
-        }
+        vSend.SetVersion(209);
+        vRecv.SetVersion(209);
         nLastSend = 0;
         nLastRecv = 0;
         nLastSendEmpty = GetTime();
@@ -198,6 +194,7 @@ public:
         fGetAddr = false;
         vfSubscribe.assign(256, false);
         nMisbehavior = 0;
+        setInventoryKnown.max_size(SendBufferSize() / 1000);
 
         // Be shy and don't send version until we hear
         if (!fInbound)
@@ -333,14 +330,11 @@ public:
         memcpy((char*)&vSend[nHeaderStart] + offsetof(CMessageHeader, nMessageSize), &nSize, sizeof(nSize));
 
         // Set the checksum
-        if (vSend.GetVersion() >= 209)
-        {
-            uint256 hash = Hash(vSend.begin() + nMessageStart, vSend.end());
-            unsigned int nChecksum = 0;
-            memcpy(&nChecksum, &hash, sizeof(nChecksum));
-            assert(nMessageStart - nHeaderStart >= offsetof(CMessageHeader, nChecksum) + sizeof(nChecksum));
-            memcpy((char*)&vSend[nHeaderStart] + offsetof(CMessageHeader, nChecksum), &nChecksum, sizeof(nChecksum));
-        }
+        uint256 hash = Hash(vSend.begin() + nMessageStart, vSend.end());
+        unsigned int nChecksum = 0;
+        memcpy(&nChecksum, &hash, sizeof(nChecksum));
+        assert(nMessageStart - nHeaderStart >= offsetof(CMessageHeader, nChecksum) + sizeof(nChecksum));
+        memcpy((char*)&vSend[nHeaderStart] + offsetof(CMessageHeader, nChecksum), &nChecksum, sizeof(nChecksum));
 
         if (fDebug) {
             printf("(%d bytes)\n", nSize);

@@ -58,7 +58,6 @@ BitcoinGUI::BitcoinGUI(QWidget *parent):
     QMainWindow(parent),
     clientModel(0),
     walletModel(0),
-    dummyWidget(0),
     encryptWalletAction(0),
     changePassphraseAction(0),
     aboutQtAction(0),
@@ -87,9 +86,6 @@ BitcoinGUI::BitcoinGUI(QWidget *parent):
 
     // Create the tray icon (or setup the dock icon)
     createTrayIcon();
-
-    // Dummy widget used when restoring window state after minimization
-    dummyWidget = new QWidget();
 
     // Create tabs
     overviewPage = new OverviewPage();
@@ -170,7 +166,6 @@ BitcoinGUI::~BitcoinGUI()
 #ifdef Q_WS_MAC
     delete appMenuBar;
 #endif
-    delete dummyWidget;
 }
 
 void BitcoinGUI::createActions()
@@ -214,17 +209,17 @@ void BitcoinGUI::createActions()
 #endif
     tabGroup->addAction(messageAction);
 
-    connect(overviewAction, SIGNAL(triggered()), this, SLOT(showNormal()));
+    connect(overviewAction, SIGNAL(triggered()), this, SLOT(showNormalIfMinimized()));
     connect(overviewAction, SIGNAL(triggered()), this, SLOT(gotoOverviewPage()));
-    connect(historyAction, SIGNAL(triggered()), this, SLOT(showNormal()));
+    connect(historyAction, SIGNAL(triggered()), this, SLOT(showNormalIfMinimized()));
     connect(historyAction, SIGNAL(triggered()), this, SLOT(gotoHistoryPage()));
-    connect(addressBookAction, SIGNAL(triggered()), this, SLOT(showNormal()));
+    connect(addressBookAction, SIGNAL(triggered()), this, SLOT(showNormalIfMinimized()));
     connect(addressBookAction, SIGNAL(triggered()), this, SLOT(gotoAddressBookPage()));
-    connect(receiveCoinsAction, SIGNAL(triggered()), this, SLOT(showNormal()));
+    connect(receiveCoinsAction, SIGNAL(triggered()), this, SLOT(showNormalIfMinimized()));
     connect(receiveCoinsAction, SIGNAL(triggered()), this, SLOT(gotoReceiveCoinsPage()));
-    connect(sendCoinsAction, SIGNAL(triggered()), this, SLOT(showNormal()));
+    connect(sendCoinsAction, SIGNAL(triggered()), this, SLOT(showNormalIfMinimized()));
     connect(sendCoinsAction, SIGNAL(triggered()), this, SLOT(gotoSendCoinsPage()));
-    connect(messageAction, SIGNAL(triggered()), this, SLOT(showNormal()));
+    connect(messageAction, SIGNAL(triggered()), this, SLOT(showNormalIfMinimized()));
     connect(messageAction, SIGNAL(triggered()), this, SLOT(gotoMessagePage()));
 
     quitAction = new QAction(QIcon(":/icons/quit"), tr("E&xit"), this);
@@ -256,7 +251,7 @@ void BitcoinGUI::createActions()
     connect(optionsAction, SIGNAL(triggered()), this, SLOT(optionsClicked()));
     connect(aboutAction, SIGNAL(triggered()), this, SLOT(aboutClicked()));
     connect(aboutQtAction, SIGNAL(triggered()), qApp, SLOT(aboutQt()));
-    connect(openBitcoinAction, SIGNAL(triggered()), this, SLOT(showNormal()));
+    connect(openBitcoinAction, SIGNAL(triggered()), this, SLOT(showNormalIfMinimized()));
     connect(encryptWalletAction, SIGNAL(triggered(bool)), this, SLOT(encryptWallet(bool)));
     connect(backupWalletAction, SIGNAL(triggered()), this, SLOT(backupWallet()));
     connect(changePassphraseAction, SIGNAL(triggered()), this, SLOT(changePassphrase()));
@@ -274,17 +269,17 @@ void BitcoinGUI::createMenuBar()
 
     // Configure the menus
     QMenu *file = appMenuBar->addMenu(tr("&File"));
+    file->addAction(backupWalletAction);
     file->addAction(exportAction);
 #ifndef FIRST_CLASS_MESSAGING
     file->addAction(messageAction);
-    file->addSeparator();
 #endif
+    file->addSeparator();
     file->addAction(quitAction);
 
     QMenu *settings = appMenuBar->addMenu(tr("&Settings"));
     settings->addAction(encryptWalletAction);
     settings->addAction(changePassphraseAction);
-    settings->addAction(backupWalletAction);
     settings->addSeparator();
     settings->addAction(optionsAction);
 
@@ -422,14 +417,6 @@ void BitcoinGUI::trayIconActivated(QSystemTrayIcon::ActivationReason reason)
 }
 #endif
 
-void BitcoinGUI::showNormal()
-{
-    // Reparent window to the desktop (in case it was hidden on minimize)
-    if(parent() != NULL)
-        setParent(NULL, Qt::Window);
-    QMainWindow::showNormal();
-}
-
 void BitcoinGUI::optionsClicked()
 {
     if(!clientModel || !clientModel->getOptionsModel())
@@ -505,7 +492,11 @@ void BitcoinGUI::setNumBlocks(int count)
     QString text;
 
     // Represent time from last generated block in human readable text
-    if(secs < 60)
+    if(secs <= 0)
+    {
+        // Fully up to date. Leave text empty.
+    }
+    else if(secs < 60)
     {
         text = tr("%n second(s) ago","",secs);
     }
@@ -525,7 +516,7 @@ void BitcoinGUI::setNumBlocks(int count)
     // Set icon state: spinning if catching up, tick otherwise
     if(secs < 30*60)
     {
-        tooltip = tr("Up to date") + QString("\n") + tooltip;
+        tooltip = tr("Up to date") + QString(".\n") + tooltip;
         labelBlocksIcon->setPixmap(QIcon(":/icons/synced").pixmap(STATUSBAR_ICONSIZE,STATUSBAR_ICONSIZE));
     }
     else
@@ -535,8 +526,11 @@ void BitcoinGUI::setNumBlocks(int count)
         syncIconMovie->start();
     }
 
-    tooltip += QString("\n");
-    tooltip += tr("Last received block was generated %1.").arg(text);
+    if(!text.isEmpty())
+    {
+        tooltip += QString("\n");
+        tooltip += tr("Last received block was generated %1.").arg(text);
+    }
 
     labelBlocksIcon->setToolTip(tooltip);
     progressBarLabel->setToolTip(tooltip);
@@ -569,15 +563,19 @@ void BitcoinGUI::changeEvent(QEvent *e)
     {
         if(clientModel && clientModel->getOptionsModel()->getMinimizeToTray())
         {
-            if(isMinimized())
+            QWindowStateChangeEvent *wsevt = static_cast<QWindowStateChangeEvent*>(e);
+            bool wasMinimized = wsevt->oldState() & Qt::WindowMinimized;
+            bool isMinimized = windowState() & Qt::WindowMinimized;
+            if(!wasMinimized && isMinimized)
             {
-                // Hiding the window from taskbar
-                setParent(dummyWidget, Qt::SubWindow);
+                // Minimized, hide the window from taskbar
+                setWindowFlags(windowFlags() | Qt::Tool);
                 return;
             }
-            else
+            else if(wasMinimized && !isMinimized)
             {
-                showNormal();
+                // Unminimized, show the window in taskbar
+                setWindowFlags(windowFlags() &~ Qt::Tool);
             }
         }
     }
@@ -814,4 +812,12 @@ void BitcoinGUI::unlockWallet()
         dlg.setModel(walletModel);
         dlg.exec();
     }
+}
+
+void BitcoinGUI::showNormalIfMinimized()
+{
+    if(!isVisible()) // Show, if hidden
+        show();
+    if(isMinimized()) // Unminimize, if minimized
+        showNormal();
 }

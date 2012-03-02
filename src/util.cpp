@@ -787,46 +787,23 @@ void PrintExceptionContinue(std::exception* pex, const char* pszThread)
     strMiscWarning = pszMessage;
 }
 
-
-
-
-
-
-
-
 #ifdef WIN32
-typedef WINSHELLAPI BOOL (WINAPI *PSHGETSPECIALFOLDERPATHA)(HWND hwndOwner, LPSTR lpszPath, int nFolder, BOOL fCreate);
-
 string MyGetSpecialFolderPath(int nFolder, bool fCreate)
 {
-    char pszPath[MAX_PATH+100] = "";
-
-    // SHGetSpecialFolderPath isn't always available on old Windows versions
-    HMODULE hShell32 = LoadLibraryA("shell32.dll");
-    if (hShell32)
+    char pszPath[MAX_PATH] = "";
+    if(SHGetSpecialFolderPathA(NULL, pszPath, nFolder, fCreate))
     {
-        PSHGETSPECIALFOLDERPATHA pSHGetSpecialFolderPath =
-            (PSHGETSPECIALFOLDERPATHA)GetProcAddress(hShell32, "SHGetSpecialFolderPathA");
-        if (pSHGetSpecialFolderPath)
-            (*pSHGetSpecialFolderPath)(NULL, pszPath, nFolder, fCreate);
-        FreeModule(hShell32);
+        return pszPath;
     }
-
-    // Backup option
-    if (pszPath[0] == '\0')
+    else if (nFolder == CSIDL_STARTUP)
     {
-        if (nFolder == CSIDL_STARTUP)
-        {
-            strcpy(pszPath, getenv("USERPROFILE"));
-            strcat(pszPath, "\\Start Menu\\Programs\\Startup");
-        }
-        else if (nFolder == CSIDL_APPDATA)
-        {
-            strcpy(pszPath, getenv("APPDATA"));
-        }
+        return string(getenv("USERPROFILE")) + "\\Start Menu\\Programs\\Startup";
     }
-
-    return pszPath;
+    else if (nFolder == CSIDL_APPDATA)
+    {
+        return getenv("APPDATA");
+    }
+    return "";
 }
 #endif
 
@@ -908,15 +885,28 @@ string GetConfigFile()
     return pathConfig.string();
 }
 
-void ReadConfigFile(map<string, string>& mapSettingsRet,
+bool ReadConfigFile(map<string, string>& mapSettingsRet,
                     map<string, vector<string> >& mapMultiSettingsRet)
 {
     namespace fs = boost::filesystem;
     namespace pod = boost::program_options::detail;
 
+    if (mapSettingsRet.count("-datadir"))
+    {
+        if (fs::is_directory(fs::system_complete(mapSettingsRet["-datadir"])))
+        {
+            fs::path pathDataDir = fs::system_complete(mapSettingsRet["-datadir"]);
+            strlcpy(pszSetDataDir, pathDataDir.string().c_str(), sizeof(pszSetDataDir));
+        }
+        else
+        {
+            return false;
+        }
+    }
+
     fs::ifstream streamConfig(GetConfigFile());
     if (!streamConfig.good())
-        return;
+        return true; // No bitcoin.conf file is OK
 
     set<string> setOptions;
     setOptions.insert("*");
@@ -933,6 +923,7 @@ void ReadConfigFile(map<string, string>& mapSettingsRet,
         }
         mapMultiSettingsRet[strKey].push_back(it->value[0]);
     }
+    return true;
 }
 
 string GetPidFile()
