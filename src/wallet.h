@@ -5,7 +5,7 @@
 #ifndef BITCOIN_WALLET_H
 #define BITCOIN_WALLET_H
 
-#include "bignum.h"
+#include "main.h"
 #include "key.h"
 #include "keystore.h"
 #include "script.h"
@@ -23,6 +23,34 @@ enum WalletFeature
     FEATURE_COMPRPUBKEY = 60000, // compressed public keys
 
     FEATURE_LATEST = 60000
+};
+
+
+/** A key pool entry */
+class CKeyPool
+{
+public:
+    int64 nTime;
+    std::vector<unsigned char> vchPubKey;
+
+    CKeyPool()
+    {
+        nTime = GetTime();
+    }
+
+    CKeyPool(const std::vector<unsigned char>& vchPubKeyIn)
+    {
+        nTime = GetTime();
+        vchPubKey = vchPubKeyIn;
+    }
+
+    IMPLEMENT_SERIALIZE
+    (
+        if (!(nType & SER_GETHASH))
+            READWRITE(nVersion);
+        READWRITE(nTime);
+        READWRITE(vchPubKey);
+    )
 };
 
 /** A CWallet is an extension of a keystore, which also maintains a set of transactions and balances,
@@ -196,11 +224,7 @@ public:
         }
         return nChange;
     }
-    void SetBestChain(const CBlockLocator& loc)
-    {
-        CWalletDB walletdb(strWalletFile);
-        walletdb.WriteBestBlock(loc);
-    }
+    void SetBestChain(const CBlockLocator& loc);
 
     int LoadWallet(bool& fFirstRunRet);
 //    bool BackupWallet(const std::string& strDest);
@@ -211,16 +235,18 @@ public:
 
     void UpdatedTransaction(const uint256 &hashTx)
     {
-        CRITICAL_BLOCK(cs_wallet)
+        {
+            LOCK(cs_wallet);
             vWalletUpdated.push_back(hashTx);
+        }
     }
 
     void PrintWallet(const CBlock& block);
 
     void Inventory(const uint256 &hash)
     {
-        CRITICAL_BLOCK(cs_wallet)
         {
+            LOCK(cs_wallet);
             std::map<uint256, int>::iterator mi = mapRequestCount.find(hash);
             if (mi != mapRequestCount.end())
                 (*mi).second++;
@@ -291,19 +317,14 @@ public:
     std::vector<char> vfSpent; // which outputs are already spent
 
     // memory only
-    mutable char fDebitCached;
-    mutable char fCreditCached;
-    mutable char fAvailableCreditCached;
-    mutable char fChangeCached;
+    mutable bool fDebitCached;
+    mutable bool fCreditCached;
+    mutable bool fAvailableCreditCached;
+    mutable bool fChangeCached;
     mutable int64 nDebitCached;
     mutable int64 nCreditCached;
     mutable int64 nAvailableCreditCached;
     mutable int64 nChangeCached;
-
-    // memory only UI hints
-    mutable unsigned int nTimeDisplayed;
-    mutable int nLinesDisplayed;
-    mutable char fConfirmedDisplayed;
 
     CWalletTx()
     {
@@ -344,9 +365,6 @@ public:
         nCreditCached = 0;
         nAvailableCreditCached = 0;
         nChangeCached = 0;
-        nTimeDisplayed = 0;
-        nLinesDisplayed = 0;
-        fConfirmedDisplayed = false;
     }
 
     IMPLEMENT_SERIALIZE
@@ -400,7 +418,7 @@ public:
     bool UpdateSpent(const std::vector<char>& vfNewSpent)
     {
         bool fReturn = false;
-        for (int i=0; i < vfNewSpent.size(); i++)
+        for (unsigned int i = 0; i < vfNewSpent.size(); i++)
         {
             if (i == vfSpent.size())
                 break;
@@ -486,7 +504,7 @@ public:
             return nAvailableCreditCached;
 
         int64 nCredit = 0;
-        for (int i = 0; i < vout.size(); i++)
+        for (unsigned int i = 0; i < vout.size(); i++)
         {
             if (!IsSpent(i))
             {
@@ -539,7 +557,7 @@ public:
         std::vector<const CMerkleTx*> vWorkQueue;
         vWorkQueue.reserve(vtxPrev.size()+1);
         vWorkQueue.push_back(this);
-        for (int i = 0; i < vWorkQueue.size(); i++)
+        for (unsigned int i = 0; i < vWorkQueue.size(); i++)
         {
             const CMerkleTx* ptx = vWorkQueue[i];
 
@@ -551,8 +569,10 @@ public:
                 return false;
 
             if (mapPrev.empty())
+            {
                 BOOST_FOREACH(const CMerkleTx& tx, vtxPrev)
                     mapPrev[tx.GetHash()] = &tx;
+            }
 
             BOOST_FOREACH(const CTxIn& txin, ptx->vin)
             {
