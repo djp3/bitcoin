@@ -189,7 +189,7 @@ int CWalletDB::LoadWallet(CWallet* pwallet)
 
                 //// debug print
                 //printf("LoadWallet  %s\n", wtx.GetHash().ToString().c_str());
-                //printf(" %12I64d  %s  %s  %s\n",
+                //printf(" %12"PRI64d"  %s  %s  %s\n",
                 //    wtx.vout[0].nValue,
                 //    DateTimeStrFormat("%x %H:%M:%S", wtx.GetBlockTime()).c_str(),
                 //    wtx.hashBlock.ToString().substr(0,20).c_str(),
@@ -367,7 +367,6 @@ void ThreadFlushWalletDB(void* parg)
                     map<string, int>::iterator mi = mapFileUseCount.find(strFile);
                     if (mi != mapFileUseCount.end())
                     {
-                        printf("%s ", DateTimeStrFormat("%x %H:%M:%S", GetTime()).c_str());
                         printf("Flushing wallet.dat\n");
                         nLastFlushed = nWalletDBUpdated;
                         int64 nStart = GetTimeMillis();

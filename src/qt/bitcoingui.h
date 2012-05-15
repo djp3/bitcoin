@@ -13,6 +13,7 @@ class AddressBookPage;
 class SendCoinsDialog;
 class MessagePage;
 class Notificator;
+class RPCConsole;
 
 QT_BEGIN_NAMESPACE
 class QLabel;
@@ -45,7 +46,7 @@ public:
         functionality.
     */
     void setWalletModel(WalletModel *walletModel);
-    
+
 protected:
     void changeEvent(QEvent *e);
     void closeEvent(QCloseEvent *event);
@@ -78,6 +79,7 @@ private:
     QAction *sendCoinsAction;
     QAction *addressBookAction;
     QAction *messageAction;
+    QAction *verifyMessageAction;
     QAction *aboutAction;
     QAction *receiveCoinsAction;
     QAction *optionsAction;
@@ -87,10 +89,12 @@ private:
     QAction *backupWalletAction;
     QAction *changePassphraseAction;
     QAction *aboutQtAction;
+    QAction *openRPCConsoleAction;
 
     QSystemTrayIcon *trayIcon;
     Notificator *notificator;
     TransactionView *transactionView;
+    RPCConsole *rpcConsole;
 
     QMovie *syncIconMovie;
 
@@ -127,8 +131,7 @@ public slots:
     void askFee(qint64 nFeeRequired, bool *payFee);
     void handleURI(QString strURI);
 
-    void gotoMessagePage();
-    void gotoMessagePage(QString);
+    void gotoMessagePage(QString addr = "");
 
 private slots:
     /** Switch to overview (home) page */
@@ -161,6 +164,8 @@ private slots:
     void backupWallet();
     /** Change encrypted wallet passphrase */
     void changePassphrase();
+    /** Verify a message signature */
+    void verifyMessage();
     /** Ask for pass phrase to unlock wallet temporarily */
     void unlockWallet();
 

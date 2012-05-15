@@ -94,31 +94,23 @@ OverviewPage::OverviewPage(QWidget *parent) :
     ui(new Ui::OverviewPage),
     currentBalance(-1),
     currentUnconfirmedBalance(-1),
-    txdelegate(new TxViewDelegate())
+    txdelegate(new TxViewDelegate()), filter(0)
 {
     ui->setupUi(this);
 
-    // Balance: <balance>
-    ui->labelBalance->setFont(QFont("Monospace", -1, QFont::Bold));
-    ui->labelBalance->setToolTip(tr("Your current balance"));
-    ui->labelBalance->setTextInteractionFlags(Qt::TextSelectableByMouse|Qt::TextSelectableByKeyboard);
-
-    // Unconfirmed balance: <balance>
-    ui->labelUnconfirmed->setFont(QFont("Monospace", -1, QFont::Bold));
-    ui->labelUnconfirmed->setToolTip(tr("Total of transactions that have yet to be confirmed, and do not yet count toward the current balance"));
-    ui->labelUnconfirmed->setTextInteractionFlags(Qt::TextSelectableByMouse|Qt::TextSelectableByKeyboard);
-
-    ui->labelNumTransactions->setToolTip(tr("Total number of transactions in wallet"));
-
     // Recent transactions
-    ui->listTransactions->setStyleSheet("QListView { background:transparent }");
     ui->listTransactions->setItemDelegate(txdelegate);
     ui->listTransactions->setIconSize(QSize(DECORATION_SIZE, DECORATION_SIZE));
-    ui->listTransactions->setSelectionMode(QAbstractItemView::NoSelection);
     ui->listTransactions->setMinimumHeight(NUM_ITEMS * (DECORATION_SIZE + 2));
     ui->listTransactions->setAttribute(Qt::WA_MacShowFocusRect, false);
 
-    connect(ui->listTransactions, SIGNAL(clicked(QModelIndex)), this, SIGNAL(transactionClicked(QModelIndex)));
+    connect(ui->listTransactions, SIGNAL(clicked(QModelIndex)), this, SLOT(handleTransactionClicked(QModelIndex)));
+}
+
+void OverviewPage::handleTransactionClicked(const QModelIndex &index)
+{
+    if(filter)
+        emit transactionClicked(filter->mapToSource(index));
 }
 
 OverviewPage::~OverviewPage()
@@ -146,7 +138,7 @@ void OverviewPage::setModel(WalletModel *model)
     if(model)
     {
         // Set up transaction list
-        TransactionFilterProxy *filter = new TransactionFilterProxy();
+        filter = new TransactionFilterProxy();
         filter->setSourceModel(model->getTransactionTableModel());
         filter->setLimit(NUM_ITEMS);
         filter->setDynamicSortFilter(true);

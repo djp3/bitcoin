@@ -15,7 +15,6 @@ QRCodeDialog::QRCodeDialog(const QString &addr, const QString &label, bool enabl
 {
     ui->setupUi(this);
     setWindowTitle(QString("%1").arg(address));
-    setAttribute(Qt::WA_DeleteOnClose);
 
     ui->chkReqPayment->setVisible(enableReq);
     ui->lnReqAmount->setVisible(enableReq);
@@ -118,7 +117,7 @@ void QRCodeDialog::on_lnMessage_textChanged(const QString &arg1)
 
 void QRCodeDialog::on_btnSaveAs_clicked()
 {
-    QString fn = GUIUtil::getSaveFileName(this, tr("Save Image..."), QString(), tr("PNG Images (*.png)"));
+    QString fn = GUIUtil::getSaveFileName(this, tr("Save QR Code"), QString(), tr("PNG Images (*.png)"));
     if (!fn.isEmpty())
         myImage.scaled(EXPORT_IMAGE_SIZE, EXPORT_IMAGE_SIZE).save(fn);
 }

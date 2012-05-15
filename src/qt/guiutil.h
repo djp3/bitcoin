@@ -2,6 +2,7 @@
 #define GUIUTIL_H
 
 #include <QString>
+#include <QObject>
 
 QT_BEGIN_NAMESPACE
 class QFont;
@@ -68,6 +69,29 @@ namespace GUIUtil
 
     // Determine whether a widget is hidden behind other windows
     bool isObscured(QWidget *w);
+
+    // Open debug.log
+    void openDebugLogfile();
+
+    /** Qt event filter that intercepts ToolTipChange events, and replaces the tooltip with a rich text
+      representation if needed. This assures that Qt can word-wrap long tooltip messages.
+      Tooltips longer than the provided size threshold (in characters) are wrapped.
+     */
+    class ToolTipToRichTextFilter : public QObject
+    {
+        Q_OBJECT
+    public:
+        explicit ToolTipToRichTextFilter(int size_threshold, QObject *parent = 0);
+
+    protected:
+        bool eventFilter(QObject *obj, QEvent *evt);
+
+    private:
+        int size_threshold;
+    };
+
+    bool GetStartOnSystemStartup();
+    bool SetStartOnSystemStartup(bool fAutoStart);
 
 } // namespace GUIUtil
 

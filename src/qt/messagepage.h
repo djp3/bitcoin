@@ -23,6 +23,9 @@ public:
 
     void setAddress(QString);
 
+protected:
+    bool eventFilter(QObject *object, QEvent *event);
+
 private:
     Ui::MessagePage *ui;
     WalletModel *model;
@@ -33,6 +36,7 @@ private slots:
 
     void on_signMessage_clicked();
     void on_copyToClipboard_clicked();
+    void on_clearButton_clicked();
 };
 
 #endif // MESSAGEPAGE_H

@@ -100,14 +100,52 @@ int main(int argc, char* argv[])
 
     return 1;
 }
-#endif
 
 bool AppInit(int argc, char* argv[])
 {
     bool fRet = false;
     try
     {
-        fRet = AppInit2(argc, argv);
+        //
+        // Parameters
+        //
+        // If Qt is used, parameters/bitcoin.conf are parsed in qt/bitcoin.cpp's main()
+        ParseParameters(argc, argv);
+        if (!boost::filesystem::is_directory(GetDataDir(false)))
+        {
+            fprintf(stderr, "Error: Specified directory does not exist\n");
+            Shutdown(NULL);
+        }
+        ReadConfigFile(mapArgs, mapMultiArgs);
+
+        if (mapArgs.count("-?") || mapArgs.count("--help"))
+        {
+            // First part of help message is specific to bitcoind / RPC client
+            std::string strUsage = _("Bitcoin version") + " " + FormatFullVersion() + "\n\n" +
+                _("Usage:") + "\n" +
+                  "  bitcoind [options]                     " + "\n" +
+                  "  bitcoind [options] <command> [params]  " + _("Send command to -server or bitcoind") + "\n" +
+                  "  bitcoind [options] help                " + _("List commands") + "\n" +
+                  "  bitcoind [options] help <command>      " + _("Get help for a command") + "\n";
+
+            strUsage += "\n" + HelpMessage();
+
+            fprintf(stderr, "%s", strUsage.c_str());
+            return false;
+        }
+
+        // Command-line RPC
+        for (int i = 1; i < argc; i++)
+            if (!IsSwitchChar(argv[i][0]) && !(strlen(argv[i]) > 7 && strncasecmp(argv[i], "bitcoin:", 8) == 0))
+                fCommandLine = true;
+
+        if (fCommandLine)
+        {
+            int ret = CommandLineRPC(argc, argv);
+            exit(ret);
+        }
+
+        fRet = AppInit2();
     }
     catch (std::exception& e) {
         PrintException(&e, "AppInit()");
@@ -118,8 +156,114 @@ bool AppInit(int argc, char* argv[])
         Shutdown(NULL);
     return fRet;
 }
+#endif
 
-bool AppInit2(int argc, char* argv[])
+bool static InitError(const std::string &str)
+{
+    ThreadSafeMessageBox(str, _("Bitcoin"), wxOK | wxMODAL);
+    return false;
+
+}
+
+bool static InitWarning(const std::string &str)
+{
+    ThreadSafeMessageBox(str, _("Bitcoin"), wxOK | wxICON_EXCLAMATION | wxMODAL);
+    return true;
+}
+
+
+bool static Bind(const CService &addr) {
+    if (IsLimited(addr))
+        return false;
+    std::string strError;
+    if (!BindListenPort(addr, strError))
+        return InitError(strError);
+    return true;
+}
+
+// Core-specific options shared between UI and daemon
+std::string HelpMessage()
+{
+    string strUsage = _("Options:") + "\n" +
+        "  -conf=<file>           " + _("Specify configuration file (default: bitcoin.conf)") + "\n" +
+        "  -pid=<file>            " + _("Specify pid file (default: bitcoind.pid)") + "\n" +
+        "  -gen                   " + _("Generate coins") + "\n" +
+        "  -gen=0                 " + _("Don't generate coins") + "\n" +
+        "  -datadir=<dir>         " + _("Specify data directory") + "\n" +
+        "  -dbcache=<n>           " + _("Set database cache size in megabytes (default: 25)") + "\n" +
+        "  -dblogsize=<n>         " + _("Set database disk log size in megabytes (default: 100)") + "\n" +
+        "  -timeout=<n>           " + _("Specify connection timeout (in milliseconds)") + "\n" +
+        "  -proxy=<ip:port>       " + _("Connect through socks proxy") + "\n" +
+        "  -socks=<n>             " + _("Select the version of socks proxy to use (4 or 5, 5 is default)") + "\n" +
+        "  -noproxy=<net>         " + _("Do not use proxy for connections to network <net> (IPv4 or IPv6)") + "\n" +
+        "  -dns                   " + _("Allow DNS lookups for -addnode, -seednode and -connect") + "\n" +
+        "  -proxydns              " + _("Pass DNS requests to (SOCKS5) proxy") + "\n" +
+        "  -port=<port>           " + _("Listen for connections on <port> (default: 8333 or testnet: 18333)") + "\n" +
+        "  -maxconnections=<n>    " + _("Maintain at most <n> connections to peers (default: 125)") + "\n" +
+        "  -addnode=<ip>          " + _("Add a node to connect to and attempt to keep the connection open") + "\n" +
+        "  -connect=<ip>          " + _("Connect only to the specified node") + "\n" +
+        "  -seednode=<ip>         " + _("Connect to a node to retrieve peer addresses, and disconnect") + "\n" +
+        "  -externalip=<ip>       " + _("Specify your own public address") + "\n" +
+        "  -onlynet=<net>         " + _("Only connect to nodes in network <net> (IPv4 or IPv6)") + "\n" +
+        "  -discover              " + _("Try to discover public IP address (default: 1)") + "\n" +
+        "  -irc                   " + _("Find peers using internet relay chat (default: 0)") + "\n" +
+        "  -listen                " + _("Accept connections from outside (default: 1)") + "\n" +
+        "  -bind=<addr>           " + _("Bind to given address. Use [host]:port notation for IPv6") + "\n" +
+        "  -dnsseed               " + _("Find peers using DNS lookup (default: 1)") + "\n" +
+        "  -banscore=<n>          " + _("Threshold for disconnecting misbehaving peers (default: 100)") + "\n" +
+        "  -bantime=<n>           " + _("Number of seconds to keep misbehaving peers from reconnecting (default: 86400)") + "\n" +
+        "  -maxreceivebuffer=<n>  " + _("Maximum per-connection receive buffer, <n>*1000 bytes (default: 10000)") + "\n" +
+        "  -maxsendbuffer=<n>     " + _("Maximum per-connection send buffer, <n>*1000 bytes (default: 10000)") + "\n" +
+#ifdef USE_UPNP
+#if USE_UPNP
+        "  -upnp                  " + _("Use Universal Plug and Play to map the listening port (default: 1)") + "\n" +
+#else
+        "  -upnp                  " + _("Use Universal Plug and Play to map the listening port (default: 0)") + "\n" +
+#endif
+#endif
+        "  -detachdb              " + _("Detach block and address databases. Increases shutdown time (default: 0)") + "\n" +
+        "  -paytxfee=<amt>        " + _("Fee per KB to add to transactions you send") + "\n" +
+#ifdef QT_GUI
+        "  -server                " + _("Accept command line and JSON-RPC commands") + "\n" +
+#endif
+#if !defined(WIN32) && !defined(QT_GUI)
+        "  -daemon                " + _("Run in the background as a daemon and accept commands") + "\n" +
+#endif
+        "  -testnet               " + _("Use the test network") + "\n" +
+        "  -debug                 " + _("Output extra debugging information") + "\n" +
+        "  -logtimestamps         " + _("Prepend debug output with timestamp") + "\n" +
+        "  -printtoconsole        " + _("Send trace/debug info to console instead of debug.log file") + "\n" +
+#ifdef WIN32
+        "  -printtodebugger       " + _("Send trace/debug info to debugger") + "\n" +
+#endif
+        "  -rpcuser=<user>        " + _("Username for JSON-RPC connections") + "\n" +
+        "  -rpcpassword=<pw>      " + _("Password for JSON-RPC connections") + "\n" +
+        "  -rpcport=<port>        " + _("Listen for JSON-RPC connections on <port> (default: 8332)") + "\n" +
+        "  -rpcallowip=<ip>       " + _("Allow JSON-RPC connections from specified IP address") + "\n" +
+        "  -rpcconnect=<ip>       " + _("Send commands to node running on <ip> (default: 127.0.0.1)") + "\n" +
+        "  -blocknotify=<cmd>     " + _("Execute command when the best block changes (%s in cmd is replaced by block hash)") + "\n" +
+        "  -upgradewallet         " + _("Upgrade wallet to latest format") + "\n" +
+        "  -keypool=<n>           " + _("Set key pool size to <n> (default: 100)") + "\n" +
+        "  -rescan                " + _("Rescan the block chain for missing wallet transactions") + "\n" +
+        "  -checkblocks=<n>       " + _("How many blocks to check at startup (default: 2500, 0 = all)") + "\n" +
+        "  -checklevel=<n>        " + _("How thorough the block verification is (0-6, default: 1)") + "\n" +
+        "  -loadblock=<file>      " + _("Imports blocks from external blk000?.dat file") + "\n" +
+        "  -?                     " + _("This help message") + "\n";
+
+    strUsage += string() +
+        _("\nSSL options: (see the Bitcoin Wiki for SSL setup instructions)") + "\n" +
+        "  -rpcssl                                  " + _("Use OpenSSL (https) for JSON-RPC connections") + "\n" +
+        "  -rpcsslcertificatechainfile=<file.cert>  " + _("Server certificate file (default: server.cert)") + "\n" +
+        "  -rpcsslprivatekeyfile=<file.pem>         " + _("Server private key (default: server.pem)") + "\n" +
+        "  -rpcsslciphers=<ciphers>                 " + _("Acceptable ciphers (default: TLSv1+HIGH:!SSLv2:!aNULL:!eNULL:!AH:!3DES:@STRENGTH)") + "\n";
+
+    return strUsage;
+}
+
+/** Initialize bitcoin.
+ *  @pre Parameters should be parsed and config file should be read.
+ */
+bool AppInit2()
 {
 #ifdef _MSC_VER
     // Turn off microsoft heap dump noise
@@ -143,111 +287,6 @@ bool AppInit2(int argc, char* argv[])
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGHUP, &sa, NULL);
 #endif
-
-    //
-    // Parameters
-    //
-    // If Qt is used, parameters/bitcoin.conf are parsed in qt/bitcoin.cpp's main()
-#if !defined(QT_GUI)
-    ParseParameters(argc, argv);
-    if (!boost::filesystem::is_directory(GetDataDir(false)))
-    {
-        fprintf(stderr, "Error: Specified directory does not exist\n");
-        Shutdown(NULL);
-    }
-    ReadConfigFile(mapArgs, mapMultiArgs);
-#endif
-
-    if (mapArgs.count("-?") || mapArgs.count("--help"))
-    {
-        string strUsage = string() +
-          _("Bitcoin version") + " " + FormatFullVersion() + "\n\n" +
-          _("Usage:") + "\t\t\t\t\t\t\t\t\t\t\n" +
-            "  bitcoind [options]                   \t  " + "\n" +
-            "  bitcoind [options] <command> [params]\t  " + _("Send command to -server or bitcoind") + "\n" +
-            "  bitcoind [options] help              \t\t  " + _("List commands") + "\n" +
-            "  bitcoind [options] help <command>    \t\t  " + _("Get help for a command") + "\n" +
-          _("Options:") + "\n" +
-            "  -conf=<file>     \t\t  " + _("Specify configuration file (default: bitcoin.conf)") + "\n" +
-            "  -pid=<file>      \t\t  " + _("Specify pid file (default: bitcoind.pid)") + "\n" +
-            "  -gen             \t\t  " + _("Generate coins") + "\n" +
-            "  -gen=0           \t\t  " + _("Don't generate coins") + "\n" +
-            "  -min             \t\t  " + _("Start minimized") + "\n" +
-            "  -splash          \t\t  " + _("Show splash screen on startup (default: 1)") + "\n" +
-            "  -datadir=<dir>   \t\t  " + _("Specify data directory") + "\n" +
-            "  -dbcache=<n>     \t\t  " + _("Set database cache size in megabytes (default: 25)") + "\n" +
-            "  -dblogsize=<n>   \t\t  " + _("Set database disk log size in megabytes (default: 100)") + "\n" +
-            "  -timeout=<n>     \t  "   + _("Specify connection timeout (in milliseconds)") + "\n" +
-            "  -proxy=<ip:port> \t  "   + _("Connect through socks4 proxy") + "\n" +
-            "  -dns             \t  "   + _("Allow DNS lookups for addnode and connect") + "\n" +
-            "  -port=<port>     \t\t  " + _("Listen for connections on <port> (default: 8333 or testnet: 18333)") + "\n" +
-            "  -maxconnections=<n>\t  " + _("Maintain at most <n> connections to peers (default: 125)") + "\n" +
-            "  -addnode=<ip>    \t  "   + _("Add a node to connect to and attempt to keep the connection open") + "\n" +
-            "  -connect=<ip>    \t\t  " + _("Connect only to the specified node") + "\n" +
-            "  -irc             \t  "   + _("Find peers using internet relay chat (default: 0)") + "\n" +
-            "  -listen          \t  "   + _("Accept connections from outside (default: 1)") + "\n" +
-#ifdef QT_GUI
-            "  -lang=<lang>     \t\t  " + _("Set language, for example \"de_DE\" (default: system locale)") + "\n" +
-#endif
-            "  -dnsseed         \t  "   + _("Find peers using DNS lookup (default: 1)") + "\n" +
-            "  -banscore=<n>    \t  "   + _("Threshold for disconnecting misbehaving peers (default: 100)") + "\n" +
-            "  -bantime=<n>     \t  "   + _("Number of seconds to keep misbehaving peers from reconnecting (default: 86400)") + "\n" +
-            "  -maxreceivebuffer=<n>\t  " + _("Maximum per-connection receive buffer, <n>*1000 bytes (default: 10000)") + "\n" +
-            "  -maxsendbuffer=<n>\t  "   + _("Maximum per-connection send buffer, <n>*1000 bytes (default: 10000)") + "\n" +
-#ifdef USE_UPNP
-#if USE_UPNP
-            "  -upnp            \t  "   + _("Use Universal Plug and Play to map the listening port (default: 1)") + "\n" +
-#else
-            "  -upnp            \t  "   + _("Use Universal Plug and Play to map the listening port (default: 0)") + "\n" +
-#endif
-            "  -detachdb        \t  "   + _("Detach block and address databases. Increases shutdown time (default: 0)") + "\n" +
-#endif
-            "  -paytxfee=<amt>  \t  "   + _("Fee per KB to add to transactions you send") + "\n" +
-#ifdef QT_GUI
-            "  -server          \t\t  " + _("Accept command line and JSON-RPC commands") + "\n" +
-#endif
-#if !defined(WIN32) && !defined(QT_GUI)
-            "  -daemon          \t\t  " + _("Run in the background as a daemon and accept commands") + "\n" +
-#endif
-            "  -testnet         \t\t  " + _("Use the test network") + "\n" +
-            "  -debug           \t\t  " + _("Output extra debugging information") + "\n" +
-            "  -logtimestamps   \t  "   + _("Prepend debug output with timestamp") + "\n" +
-            "  -printtoconsole  \t  "   + _("Send trace/debug info to console instead of debug.log file") + "\n" +
-#ifdef WIN32
-            "  -printtodebugger \t  "   + _("Send trace/debug info to debugger") + "\n" +
-#endif
-            "  -rpcuser=<user>  \t  "   + _("Username for JSON-RPC connections") + "\n" +
-            "  -rpcpassword=<pw>\t  "   + _("Password for JSON-RPC connections") + "\n" +
-            "  -rpcport=<port>  \t\t  " + _("Listen for JSON-RPC connections on <port> (default: 8332)") + "\n" +
-            "  -rpcallowip=<ip> \t\t  " + _("Allow JSON-RPC connections from specified IP address") + "\n" +
-            "  -rpcconnect=<ip> \t  "   + _("Send commands to node running on <ip> (default: 127.0.0.1)") + "\n" +
-            "  -blocknotify=<cmd> "     + _("Execute command when the best block changes (%s in cmd is replaced by block hash)") + "\n" +
-            "  -upgradewallet   \t  "   + _("Upgrade wallet to latest format") + "\n" +
-            "  -keypool=<n>     \t  "   + _("Set key pool size to <n> (default: 100)") + "\n" +
-            "  -rescan          \t  "   + _("Rescan the block chain for missing wallet transactions") + "\n" +
-            "  -checkblocks=<n> \t\t  " + _("How many blocks to check at startup (default: 2500, 0 = all)") + "\n" +
-            "  -checklevel=<n>  \t\t  " + _("How thorough the block verification is (0-6, default: 1)") + "\n";
-
-        strUsage += string() +
-            _("\nSSL options: (see the Bitcoin Wiki for SSL setup instructions)") + "\n" +
-            "  -rpcssl                                \t  " + _("Use OpenSSL (https) for JSON-RPC connections") + "\n" +
-            "  -rpcsslcertificatechainfile=<file.cert>\t  " + _("Server certificate file (default: server.cert)") + "\n" +
-            "  -rpcsslprivatekeyfile=<file.pem>       \t  " + _("Server private key (default: server.pem)") + "\n" +
-            "  -rpcsslciphers=<ciphers>               \t  " + _("Acceptable ciphers (default: TLSv1+HIGH:!SSLv2:!aNULL:!eNULL:!AH:!3DES:@STRENGTH)") + "\n";
-
-        strUsage += string() +
-            "  -?               \t\t  " + _("This help message") + "\n";
-
-        // Remove tabs
-        strUsage.erase(std::remove(strUsage.begin(), strUsage.end(), '\t'), strUsage.end());
-#if defined(QT_GUI) && defined(WIN32)
-        // On windows, show a message box, as there is no stderr
-        ThreadSafeMessageBox(strUsage, _("Usage"), wxOK | wxMODAL);
-#else
-        fprintf(stderr, "%s", strUsage.c_str());
-#endif
-        return false;
-    }
 
     fTestNet = GetBoolArg("-testnet");
     if (fTestNet)
@@ -276,18 +315,6 @@ bool AppInit2(int argc, char* argv[])
     fPrintToConsole = GetBoolArg("-printtoconsole");
     fPrintToDebugger = GetBoolArg("-printtodebugger");
     fLogTimestamps = GetBoolArg("-logtimestamps");
-
-#ifndef QT_GUI
-    for (int i = 1; i < argc; i++)
-        if (!IsSwitchChar(argv[i][0]) && !(strlen(argv[i]) > 7 && strncasecmp(argv[i], "bitcoin:", 8) == 0))
-            fCommandLine = true;
-
-    if (fCommandLine)
-    {
-        int ret = CommandLineRPC(argc, argv);
-        exit(ret);
-    }
-#endif
 
 #if !defined(WIN32) && !defined(QT_GUI)
     if (fDaemon)
@@ -331,10 +358,7 @@ bool AppInit2(int argc, char* argv[])
     if (file) fclose(file);
     static boost::interprocess::file_lock lock(pathLockFile.string().c_str());
     if (!lock.try_lock())
-    {
-        ThreadSafeMessageBox(strprintf(_("Cannot obtain a lock on data directory %s.  Bitcoin is probably already running."), GetDataDir().string().c_str()), _("Bitcoin"), wxOK|wxMODAL);
-        return false;
-    }
+        return InitError(strprintf(_("Cannot obtain a lock on data directory %s.  Bitcoin is probably already running."), GetDataDir().string().c_str()));
 
     std::ostringstream strErrors;
     //
@@ -367,6 +391,16 @@ bool AppInit2(int argc, char* argv[])
     }
     printf(" block index %15"PRI64d"ms\n", GetTimeMillis() - nStart);
 
+    if (mapArgs.count("-loadblock"))
+    {
+        BOOST_FOREACH(string strFile, mapMultiArgs["-loadblock"])
+        {
+            FILE *file = fopen(strFile.c_str(), "rb");
+            if (file)
+                LoadExternalBlockFile(file);
+        }
+    }
+
     InitMessage(_("Loading wallet..."));
     printf("Loading wallet...\n");
     nStart = GetTimeMillis();
@@ -383,8 +417,7 @@ bool AppInit2(int argc, char* argv[])
         {
             strErrors << _("Wallet needed to be rewritten: restart Bitcoin to complete") << "\n";
             printf("%s", strErrors.str().c_str());
-            ThreadSafeMessageBox(strErrors.str(), _("Bitcoin"), wxOK | wxICON_ERROR | wxMODAL);
-            return false;
+            return InitError(strErrors.str());
         }
         else
             strErrors << _("Error loading wallet.dat") << "\n";
@@ -454,10 +487,7 @@ bool AppInit2(int argc, char* argv[])
     printf("mapAddressBook.size() = %d\n",  pwalletMain->mapAddressBook.size());
 
     if (!strErrors.str().empty())
-    {
-        ThreadSafeMessageBox(strErrors.str(), _("Bitcoin"), wxOK | wxICON_ERROR | wxMODAL);
-        return false;
-    }
+        return InitError(strErrors.str());
 
     // Add wallet transactions that aren't already in a block to mapTransactions
     pwalletMain->ReacceptWalletTransactions();
@@ -510,11 +540,25 @@ bool AppInit2(int argc, char* argv[])
         fUseProxy = true;
         addrProxy = CService(mapArgs["-proxy"], 9050);
         if (!addrProxy.IsValid())
-        {
-            ThreadSafeMessageBox(_("Invalid -proxy address"), _("Bitcoin"), wxOK | wxMODAL);
-            return false;
+            return InitError(strprintf(_("Invalid -proxy address: '%s'"), mapArgs["-proxy"].c_str()));
+    }
+
+    if (mapArgs.count("-noproxy"))
+    {
+        BOOST_FOREACH(std::string snet, mapMultiArgs["-noproxy"]) {
+            enum Network net = ParseNetwork(snet);
+            if (net == NET_UNROUTABLE)
+                return InitError(strprintf(_("Unknown network specified in -noproxy: '%s'"), snet.c_str()));
+            SetNoProxy(net);
         }
     }
+
+    if (mapArgs.count("-connect"))
+        SoftSetBoolArg("-dnsseed", false);
+
+    // even in Tor mode, if -bind is specified, you really want -listen
+    if (mapArgs.count("-bind"))
+        SoftSetBoolArg("-listen", true);
 
     bool fTor = (fUseProxy && addrProxy.GetPort() == 9050);
     if (fTor)
@@ -523,13 +567,37 @@ bool AppInit2(int argc, char* argv[])
         // Note: the GetBoolArg() calls for all of these must happen later.
         SoftSetBoolArg("-listen", false);
         SoftSetBoolArg("-irc", false);
-        SoftSetBoolArg("-dnsseed", false);
+        SoftSetBoolArg("-proxydns", true);
         SoftSetBoolArg("-upnp", false);
-        SoftSetBoolArg("-dns", false);
+        SoftSetBoolArg("-discover", false);
     }
 
-    fAllowDNS = GetBoolArg("-dns");
+    if (mapArgs.count("-onlynet")) {
+        std::set<enum Network> nets;
+        BOOST_FOREACH(std::string snet, mapMultiArgs["-onlynet"]) {
+            enum Network net = ParseNetwork(snet);
+            if (net == NET_UNROUTABLE)
+                return InitError(strprintf(_("Unknown network specified in -onlynet: '%s'"), snet.c_str()));
+            nets.insert(net);
+        }
+        for (int n = 0; n < NET_MAX; n++) {
+            enum Network net = (enum Network)n;
+            if (!nets.count(net))
+                SetLimited(net);
+        }
+    }
+
+    fNameLookup = GetBoolArg("-dns");
+    fProxyNameLookup = GetBoolArg("-proxydns");
+    if (fProxyNameLookup)
+        fNameLookup = true;
     fNoListen = !GetBoolArg("-listen", true);
+    nSocksVersion = GetArg("-socks", 5);
+    if (nSocksVersion != 4 && nSocksVersion != 5)
+        return InitError(strprintf(_("Unknown -socks proxy version requested: %i"), nSocksVersion));
+
+    BOOST_FOREACH(string strDest, mapMultiArgs["-seednode"])
+        AddOneShot(strDest);
 
     // Continue to put "/P2SH/" in the coinbase to monitor
     // BIP16 support.
@@ -537,36 +605,47 @@ bool AppInit2(int argc, char* argv[])
     const char* pszP2SH = "/P2SH/";
     COINBASE_FLAGS << std::vector<unsigned char>(pszP2SH, pszP2SH+strlen(pszP2SH));
 
+    bool fBound = false;
     if (!fNoListen)
     {
         std::string strError;
-        if (!BindListenPort(strError))
-        {
-            ThreadSafeMessageBox(strError, _("Bitcoin"), wxOK | wxMODAL);
-            return false;
+        if (mapArgs.count("-bind")) {
+            BOOST_FOREACH(std::string strBind, mapMultiArgs["-bind"]) {
+                CService addrBind;
+                if (!Lookup(strBind.c_str(), addrBind, GetListenPort(), false))
+                    return InitError(strprintf(_("Cannot resolve -bind address: '%s'"), strBind.c_str()));
+                fBound |= Bind(addrBind);
+            }
+        } else {
+            struct in_addr inaddr_any;
+            inaddr_any.s_addr = INADDR_ANY;
+            if (!IsLimited(NET_IPV4))
+                fBound |= Bind(CService(inaddr_any, GetListenPort()));
+#ifdef USE_IPV6
+            if (!IsLimited(NET_IPV6))
+                fBound |= Bind(CService(in6addr_any, GetListenPort()));
+#endif
         }
+        if (!fBound)
+            return InitError(_("Not listening on any port"));
     }
 
-    if (mapArgs.count("-addnode"))
+    if (mapArgs.count("-externalip"))
     {
-        BOOST_FOREACH(string strAddr, mapMultiArgs["-addnode"])
-        {
-            CAddress addr(CService(strAddr, GetDefaultPort(), fAllowDNS));
-            addr.nTime = 0; // so it won't relay unless successfully connected
-            if (addr.IsValid())
-                addrman.Add(addr, CNetAddr("127.0.0.1"));
+        BOOST_FOREACH(string strAddr, mapMultiArgs["-externalip"]) {
+            CService addrLocal(strAddr, GetListenPort(), fNameLookup);
+            if (!addrLocal.IsValid())
+                return InitError(strprintf(_("Cannot resolve -externalip address: '%s'"), strAddr.c_str()));
+            AddLocal(CService(strAddr, GetListenPort(), fNameLookup), LOCAL_MANUAL);
         }
     }
 
     if (mapArgs.count("-paytxfee"))
     {
         if (!ParseMoney(mapArgs["-paytxfee"], nTransactionFee))
-        {
-            ThreadSafeMessageBox(_("Invalid amount for -paytxfee=<amount>"), _("Bitcoin"), wxOK | wxMODAL);
-            return false;
-        }
+            return InitError(strprintf(_("Invalid amount for -paytxfee=<amount>: '%s'"), mapArgs["-paytxfee"].c_str()));
         if (nTransactionFee > 0.25 * COIN)
-            ThreadSafeMessageBox(_("Warning: -paytxfee is set very high.  This is the transaction fee you will pay if you send a transaction."), _("Bitcoin"), wxOK | wxICON_EXCLAMATION | wxMODAL);
+            InitWarning(_("Warning: -paytxfee is set very high.  This is the transaction fee you will pay if you send a transaction."));
     }
 
     //
@@ -578,17 +657,14 @@ bool AppInit2(int argc, char* argv[])
     RandAddSeedPerfmon();
 
     if (!CreateThread(StartNode, NULL))
-        ThreadSafeMessageBox(_("Error: CreateThread(StartNode) failed"), _("Bitcoin"), wxOK | wxMODAL);
+        InitError(_("Error: could not start node"));
 
     if (fServer)
         CreateThread(ThreadRPCServer, NULL);
 
-#ifdef QT_GUI
-    if (GetStartOnSystemStartup())
-        SetStartOnSystemStartup(true); // Remove startup links
-#endif
-
 #if !defined(QT_GUI)
+    // Loop until process is exit()ed from shutdown() function,
+    // called from ThreadRPCServer thread when a "stop" command is received.
     while (1)
         Sleep(5000);
 #endif

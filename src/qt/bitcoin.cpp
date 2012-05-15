@@ -6,6 +6,7 @@
 #include "walletmodel.h"
 #include "optionsmodel.h"
 #include "guiutil.h"
+#include "guiconstants.h"
 
 #include "init.h"
 #include "ui_interface.h"
@@ -128,6 +129,53 @@ static void handleRunawayException(std::exception *e)
     exit(1);
 }
 
+/** Help message for Bitcoin-Qt, shown with --help. */
+class HelpMessageBox: public QMessageBox
+{
+public:
+    HelpMessageBox(QWidget *parent = 0);
+
+    void exec();
+private:
+    QString header;
+    QString coreOptions;
+    QString uiOptions;
+};
+#include <QSpacerItem>
+#include <QGridLayout>
+HelpMessageBox::HelpMessageBox(QWidget *parent):
+    QMessageBox(parent)
+{
+    header = tr("Bitcoin-Qt") + " " + tr("version") + " " +
+            QString::fromStdString(FormatFullVersion()) + "\n\n" +
+        tr("Usage:") + "\n" +
+          "  bitcoin-qt [options]                     " + "\n";
+    coreOptions = QString::fromStdString(HelpMessage());
+    uiOptions = tr("UI options") + ":\n" +
+            "  -lang=<lang>           " + tr("Set language, for example \"de_DE\" (default: system locale)") + "\n" +
+            "  -min                   " + tr("Start minimized") + "\n" +
+            "  -splash                " + tr("Show splash screen on startup (default: 1)") + "\n";
+
+    setWindowTitle(tr("Bitcoin-Qt"));
+    setTextFormat(Qt::PlainText);
+    // setMinimumWidth is ignored for QMessageBox so put in nonbreaking spaces to make it wider.
+    QChar em_space(0x2003);
+    setText(header + QString(em_space).repeated(40));
+    setDetailedText(coreOptions + "\n" + uiOptions);
+}
+
+void HelpMessageBox::exec()
+{
+#if defined(WIN32)
+    // On windows, show a message box, as there is no stderr in windowed applications
+    QMessageBox::exec();
+#else
+    // On other operating systems, the expected action is to print the message to the console.
+    QString strUsage = header + "\n" + coreOptions + "\n" + uiOptions;
+    fprintf(stderr, "%s", strUsage.toStdString().c_str());
+#endif
+}
+
 #ifdef WIN32
 #define strncasecmp strnicmp
 #endif
@@ -164,6 +212,9 @@ int main(int argc, char *argv[])
     Q_INIT_RESOURCE(bitcoin);
     QApplication app(argc, argv);
 
+    // Install global event filter that makes sure that long tooltips can be word-wrapped
+    app.installEventFilter(new GUIUtil::ToolTipToRichTextFilter(TOOLTIP_WRAP_THRESHOLD, &app));
+
     // Command-line options take precedence:
     ParseParameters(argc, argv);
 
@@ -187,31 +238,41 @@ int main(int argc, char *argv[])
     // ... then GUI settings:
     OptionsModel optionsModel;
 
-    // Get desired locale ("en_US") from command line or system locale
+    // Get desired locale (e.g. "de_DE") from command line or use system locale
     QString lang_territory = QString::fromStdString(GetArg("-lang", QLocale::system().name().toStdString()));
+    QString lang = lang_territory;
+    // Convert to "de" only by truncating "_DE"
+    lang.truncate(lang_territory.lastIndexOf('_'));
+
+    QTranslator qtTranslatorBase, qtTranslator, translatorBase, translator;
     // Load language files for configured locale:
     // - First load the translator for the base language, without territory
     // - Then load the more specific locale translator
-    QString lang = lang_territory;
 
-    lang.truncate(lang_territory.lastIndexOf('_')); // "en"
-    QTranslator qtTranslatorBase, qtTranslator, translatorBase, translator;
-
-    qtTranslatorBase.load(QLibraryInfo::location(QLibraryInfo::TranslationsPath) + "/qt_" + lang);
-    if (!qtTranslatorBase.isEmpty())
+    // Load e.g. qt_de.qm
+    if (qtTranslatorBase.load("qt_" + lang, QLibraryInfo::location(QLibraryInfo::TranslationsPath)))
         app.installTranslator(&qtTranslatorBase);
 
-    qtTranslator.load(QLibraryInfo::location(QLibraryInfo::TranslationsPath) + "/qt_" + lang_territory);
-    if (!qtTranslator.isEmpty())
+    // Load e.g. qt_de_DE.qm
+    if (qtTranslator.load("qt_" + lang_territory, QLibraryInfo::location(QLibraryInfo::TranslationsPath)))
         app.installTranslator(&qtTranslator);
 
-    translatorBase.load(":/translations/"+lang);
-    if (!translatorBase.isEmpty())
+    // Load e.g. bitcoin_de.qm (shortcut "de" needs to be defined in bitcoin.qrc)
+    if (translatorBase.load(lang, ":/translations/"))
         app.installTranslator(&translatorBase);
 
-    translator.load(":/translations/"+lang_territory);
-    if (!translator.isEmpty())
+    // Load e.g. bitcoin_de_DE.qm (shortcut "de_DE" needs to be defined in bitcoin.qrc)
+    if (translator.load(lang_territory, ":/translations/"))
         app.installTranslator(&translator);
+
+    // Show help message immediately after parsing command-line options (for "-lang") and setting locale,
+    // but before showing splash screen.
+    if (mapArgs.count("-?") || mapArgs.count("--help"))
+    {
+        HelpMessageBox help;
+        help.exec();
+        return 1;
+    }
 
     QSplashScreen splash(QPixmap(":/images/splash"), 0);
     if (GetBoolArg("-splash", true) && !GetBoolArg("-min"))
@@ -227,9 +288,13 @@ int main(int argc, char *argv[])
 
     try
     {
+        // Regenerate startup link, to fix links to old versions
+        if (GUIUtil::GetStartOnSystemStartup())
+            GUIUtil::SetStartOnSystemStartup(true);
+
         BitcoinGUI window;
         guiref = &window;
-        if(AppInit2(argc, argv))
+        if(AppInit2())
         {
             {
                 // Put this in a block, so that the Model objects are cleaned up before
@@ -281,6 +346,7 @@ int main(int argc, char *argv[])
 #endif
                 app.exec();
 
+                window.hide();
                 window.setClientModel(0);
                 window.setWalletModel(0);
                 guiref = 0;

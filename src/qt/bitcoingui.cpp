@@ -1,14 +1,15 @@
 /*
  * Qt4 bitcoin GUI.
  *
- * W.J. van der Laan 20011-2012
- * The Bitcoin Developers 20011-2012
+ * W.J. van der Laan 2011-2012
+ * The Bitcoin Developers 2011-2012
  */
 #include "bitcoingui.h"
 #include "transactiontablemodel.h"
 #include "addressbookpage.h"
 #include "sendcoinsdialog.h"
 #include "messagepage.h"
+#include "verifymessagedialog.h"
 #include "optionsdialog.h"
 #include "aboutdialog.h"
 #include "clientmodel.h"
@@ -24,6 +25,7 @@
 #include "askpassphrasedialog.h"
 #include "notificator.h"
 #include "guiutil.h"
+#include "rpcconsole.h"
 
 #ifdef Q_WS_MAC
 #include "macdockiconhandler.h"
@@ -64,11 +66,13 @@ BitcoinGUI::BitcoinGUI(QWidget *parent):
     changePassphraseAction(0),
     aboutQtAction(0),
     trayIcon(0),
-    notificator(0)
+    notificator(0),
+    rpcConsole(0)
 {
     resize(850, 550);
     setWindowTitle(tr("Bitcoin Wallet"));
 #ifndef Q_WS_MAC
+    qApp->setWindowIcon(QIcon(":icons/bitcoin"));
     setWindowIcon(QIcon(":icons/bitcoin"));
 #else
     setUnifiedTitleAndToolBarOnMac(true);
@@ -154,9 +158,13 @@ BitcoinGUI::BitcoinGUI(QWidget *parent):
 
     // Clicking on a transaction on the overview page simply sends you to transaction history page
     connect(overviewPage, SIGNAL(transactionClicked(QModelIndex)), this, SLOT(gotoHistoryPage()));
+    connect(overviewPage, SIGNAL(transactionClicked(QModelIndex)), transactionView, SLOT(focusTransaction(QModelIndex)));
 
     // Doubleclicking on a transaction on the transaction history page shows details
     connect(transactionView, SIGNAL(doubleClicked(QModelIndex)), transactionView, SLOT(showDetails()));
+
+    rpcConsole = new RPCConsole(this);
+    connect(openRPCConsoleAction, SIGNAL(triggered()), rpcConsole, SLOT(show()));
 
     gotoOverviewPage();
 }
@@ -204,7 +212,7 @@ void BitcoinGUI::createActions()
     sendCoinsAction->setShortcut(QKeySequence(Qt::ALT + Qt::Key_2));
     tabGroup->addAction(sendCoinsAction);
 
-    messageAction = new QAction(QIcon(":/icons/edit"), tr("Sign &message"), this);
+    messageAction = new QAction(QIcon(":/icons/edit"), tr("Sign &message..."), this);
     messageAction->setToolTip(tr("Prove you control an address"));
 #ifdef FIRST_CLASS_MESSAGING
     messageAction->setCheckable(true);
@@ -241,13 +249,17 @@ void BitcoinGUI::createActions()
     toggleHideAction->setToolTip(tr("Show or hide the Bitcoin window"));
     exportAction = new QAction(QIcon(":/icons/export"), tr("&Export..."), this);
     exportAction->setToolTip(tr("Export the data in the current tab to a file"));
-    encryptWalletAction = new QAction(QIcon(":/icons/lock_closed"), tr("&Encrypt Wallet"), this);
+    encryptWalletAction = new QAction(QIcon(":/icons/lock_closed"), tr("&Encrypt Wallet..."), this);
     encryptWalletAction->setToolTip(tr("Encrypt or decrypt wallet"));
     encryptWalletAction->setCheckable(true);
-    backupWalletAction = new QAction(QIcon(":/icons/filesave"), tr("&Backup Wallet"), this);
+    backupWalletAction = new QAction(QIcon(":/icons/filesave"), tr("&Backup Wallet..."), this);
     backupWalletAction->setToolTip(tr("Backup wallet to another location"));
-    changePassphraseAction = new QAction(QIcon(":/icons/key"), tr("&Change Passphrase"), this);
+    changePassphraseAction = new QAction(QIcon(":/icons/key"), tr("&Change Passphrase..."), this);
     changePassphraseAction->setToolTip(tr("Change the passphrase used for wallet encryption"));
+    openRPCConsoleAction = new QAction(tr("&Debug window"), this);
+    openRPCConsoleAction->setToolTip(tr("Open debugging and diagnostic console"));
+    verifyMessageAction = new QAction(QIcon(":/icons/transaction_0"), tr("&Verify message..."), this);
+    verifyMessageAction->setToolTip(tr("Verify a message signature"));
 
     connect(quitAction, SIGNAL(triggered()), qApp, SLOT(quit()));
     connect(optionsAction, SIGNAL(triggered()), this, SLOT(optionsClicked()));
@@ -257,6 +269,7 @@ void BitcoinGUI::createActions()
     connect(encryptWalletAction, SIGNAL(triggered(bool)), this, SLOT(encryptWallet(bool)));
     connect(backupWalletAction, SIGNAL(triggered()), this, SLOT(backupWallet()));
     connect(changePassphraseAction, SIGNAL(triggered()), this, SLOT(changePassphrase()));
+    connect(verifyMessageAction, SIGNAL(triggered()), this, SLOT(verifyMessage()));
 }
 
 void BitcoinGUI::createMenuBar()
@@ -276,6 +289,7 @@ void BitcoinGUI::createMenuBar()
 #ifndef FIRST_CLASS_MESSAGING
     file->addAction(messageAction);
 #endif
+    file->addAction(verifyMessageAction);
     file->addSeparator();
     file->addAction(quitAction);
 
@@ -286,6 +300,8 @@ void BitcoinGUI::createMenuBar()
     settings->addAction(optionsAction);
 
     QMenu *help = appMenuBar->addMenu(tr("&Help"));
+    help->addAction(openRPCConsoleAction);
+    help->addSeparator();
     help->addAction(aboutAction);
     help->addAction(aboutQtAction);
 }
@@ -315,17 +331,18 @@ void BitcoinGUI::setClientModel(ClientModel *clientModel)
     {
         if(clientModel->isTestNet())
         {
-            QString title_testnet = windowTitle() + QString(" ") + tr("[testnet]");
-            setWindowTitle(title_testnet);
+            setWindowTitle(windowTitle() + QString(" ") + tr("[testnet]"));
 #ifndef Q_WS_MAC
+            qApp->setWindowIcon(QIcon(":icons/bitcoin_testnet"));
             setWindowIcon(QIcon(":icons/bitcoin_testnet"));
 #else
             MacDockIconHandler::instance()->setIcon(QIcon(":icons/bitcoin_testnet"));
 #endif
             if(trayIcon)
             {
-                trayIcon->setToolTip(title_testnet);
+                trayIcon->setToolTip(tr("Bitcoin client") + QString(" ") + tr("[testnet]"));
                 trayIcon->setIcon(QIcon(":/icons/toolbar_testnet"));
+                toggleHideAction->setIcon(QIcon(":/icons/toolbar_testnet"));
             }
         }
 
@@ -338,6 +355,8 @@ void BitcoinGUI::setClientModel(ClientModel *clientModel)
 
         // Report errors from network/worker thread
         connect(clientModel, SIGNAL(error(QString,QString, bool)), this, SLOT(error(QString,QString,bool)));
+
+        rpcConsole->setClientModel(clientModel);
     }
 }
 
@@ -391,13 +410,15 @@ void BitcoinGUI::createTrayIcon()
 
     // Configuration of the tray icon (or dock icon) icon menu
     trayIconMenu->addAction(toggleHideAction);
+    trayIconMenu->addAction(openRPCConsoleAction);
     trayIconMenu->addSeparator();
     trayIconMenu->addAction(messageAction);
+    trayIconMenu->addAction(verifyMessageAction);
 #ifndef FIRST_CLASS_MESSAGING
     trayIconMenu->addSeparator();
 #endif
-    trayIconMenu->addAction(receiveCoinsAction);
     trayIconMenu->addAction(sendCoinsAction);
+    trayIconMenu->addAction(receiveCoinsAction);
     trayIconMenu->addSeparator();
     trayIconMenu->addAction(optionsAction);
 #ifndef Q_WS_MAC // This is built-in on Mac
@@ -551,21 +572,24 @@ void BitcoinGUI::setNumBlocks(int count)
     // Set icon state: spinning if catching up, tick otherwise
     if(secs < 90*60 && count >= nTotalBlocks)
     {
-        tooltip = tr("Up to date") + QString(".\n") + tooltip;
+        tooltip = tr("Up to date") + QString(".<br>") + tooltip;
         labelBlocksIcon->setPixmap(QIcon(":/icons/synced").pixmap(STATUSBAR_ICONSIZE, STATUSBAR_ICONSIZE));
     }
     else
     {
-        tooltip = tr("Catching up...") + QString("\n") + tooltip;
+        tooltip = tr("Catching up...") + QString("<br>") + tooltip;
         labelBlocksIcon->setMovie(syncIconMovie);
         syncIconMovie->start();
     }
 
     if(!text.isEmpty())
     {
-        tooltip += QString("\n");
+        tooltip += QString("<br>");
         tooltip += tr("Last received block was generated %1.").arg(text);
     }
+
+    // Don't word-wrap this (fixed-width) tooltip
+    tooltip = QString("<nobr>") + tooltip + QString("</nobr>");
 
     labelBlocksIcon->setToolTip(tooltip);
     progressBarLabel->setToolTip(tooltip);
@@ -625,7 +649,7 @@ void BitcoinGUI::askFee(qint64 nFeeRequired, bool *payFee)
           "Do you want to pay the fee?").arg(
                 BitcoinUnits::formatWithUnit(BitcoinUnits::BTC, nFeeRequired));
     QMessageBox::StandardButton retval = QMessageBox::question(
-          this, tr("Sending..."), strMessage,
+          this, tr("Confirm transaction fee"), strMessage,
           QMessageBox::Yes|QMessageBox::Cancel, QMessageBox::Yes);
     *payFee = (retval == QMessageBox::Yes);
 }
@@ -713,8 +737,11 @@ void BitcoinGUI::gotoSendCoinsPage()
     disconnect(exportAction, SIGNAL(triggered()), 0, 0);
 }
 
-void BitcoinGUI::gotoMessagePage()
+void BitcoinGUI::gotoMessagePage(QString addr)
 {
+    if(!addr.isEmpty())
+        messagePage->setAddress(addr);
+
 #ifdef FIRST_CLASS_MESSAGING
     messageAction->setChecked(true);
     centralWidget->setCurrentWidget(messagePage);
@@ -723,14 +750,7 @@ void BitcoinGUI::gotoMessagePage()
     disconnect(exportAction, SIGNAL(triggered()), 0, 0);
 #else
     messagePage->show();
-    messagePage->setFocus();
 #endif
-}
-
-void BitcoinGUI::gotoMessagePage(QString addr)
-{
-    gotoMessagePage();
-    messagePage->setAddress(addr);
 }
 
 void BitcoinGUI::dragEnterEvent(QDragEnterEvent *event)
@@ -823,6 +843,13 @@ void BitcoinGUI::changePassphrase()
     AskPassphraseDialog dlg(AskPassphraseDialog::ChangePass, this);
     dlg.setModel(walletModel);
     dlg.exec();
+}
+
+void BitcoinGUI::verifyMessage()
+{
+    VerifyMessageDialog *dlg = new VerifyMessageDialog(walletModel->getAddressTableModel(), this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->show();
 }
 
 void BitcoinGUI::unlockWallet()

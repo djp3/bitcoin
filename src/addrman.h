@@ -7,6 +7,7 @@
 #include "netbase.h"
 #include "protocol.h"
 #include "util.h"
+#include "sync.h"
 
 
 #include <map>
@@ -62,7 +63,7 @@ public:
         nRandomPos = -1;
     }
 
-    CAddrInfo(const CAddress &addrIn, const CNetAddr &addrSource) : CAddress(addrIn)
+    CAddrInfo(const CAddress &addrIn, const CNetAddr &addrSource) : CAddress(addrIn), source(addrSource)
     {
         Init();
     }
@@ -204,7 +205,7 @@ protected:
     CAddrInfo* Create(const CAddress &addr, const CNetAddr &addrSource, int *pnId = NULL);
 
     // Swap two elements in vRandom.
-    void SwapRandom(int nRandomPos1, int nRandomPos2);
+    void SwapRandom(unsigned int nRandomPos1, unsigned int nRandomPos2);
 
     // Return position in given bucket to replace.
     int SelectTried(int nKBucket);

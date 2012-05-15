@@ -1,8 +1,8 @@
 TEMPLATE = app
 TARGET =
-VERSION = 0.6.1
+VERSION = 0.6.99
 INCLUDEPATH += src src/json src/qt
-DEFINES += QT_GUI BOOST_THREAD_USE_LIB
+DEFINES += QT_GUI BOOST_THREAD_USE_LIB USE_IPV6
 CONFIG += no_include_pwd
 
 # for boost 1.37, add -mt to the boost libraries 
@@ -84,16 +84,16 @@ contains(BITCOIN_NEED_QT_PLUGINS, 1) {
 !windows || contains(USE_BUILD_INFO, 1) {
     genbuild.depends = FORCE
     genbuild.commands = cd $$PWD; share/genbuild.sh $$OUT_PWD/build/build.h
-    genbuild.target = genbuildhook
-    PRE_TARGETDEPS += genbuildhook
+    genbuild.target = $$OUT_PWD/build/build.h
+    PRE_TARGETDEPS += $$OUT_PWD/build/build.h
     QMAKE_EXTRA_TARGETS += genbuild
     DEFINES += HAVE_BUILD_INFO
 }
 
-QMAKE_CXXFLAGS_WARN_ON = -fdiagnostics-show-option -Wall -Wextra -Wformat -Wformat-security -Wno-invalid-offsetof -Wno-sign-compare -Wno-unused-parameter
+QMAKE_CXXFLAGS_WARN_ON = -fdiagnostics-show-option -Wall -Wextra -Wformat -Wformat-security -Wno-unused-parameter
 
 # Input
-DEPENDPATH += src/qt src src json/include
+DEPENDPATH += src src/json src/qt
 HEADERS += src/qt/bitcoingui.h \
     src/qt/transactiontablemodel.h \
     src/qt/addresstablemodel.h \
@@ -109,6 +109,7 @@ HEADERS += src/qt/bitcoingui.h \
     src/bignum.h \
     src/checkpoints.h \
     src/compat.h \
+    src/sync.h \
     src/util.h \
     src/uint256.h \
     src/serialize.h \
@@ -158,7 +159,9 @@ HEADERS += src/qt/bitcoingui.h \
     src/qt/notificator.h \
     src/qt/qtipcserver.h \
     src/allocators.h \
-    src/ui_interface.h
+    src/ui_interface.h \
+    src/qt/rpcconsole.h \
+    src/qt/verifymessagedialog.h
 
 SOURCES += src/qt/bitcoin.cpp src/qt/bitcoingui.cpp \
     src/qt/transactiontablemodel.cpp \
@@ -171,6 +174,7 @@ SOURCES += src/qt/bitcoin.cpp src/qt/bitcoingui.cpp \
     src/qt/editaddressdialog.cpp \
     src/qt/bitcoinaddressvalidator.cpp \
     src/version.cpp \
+    src/sync.cpp \
     src/util.cpp \
     src/netbase.cpp \
     src/key.cpp \
@@ -212,7 +216,9 @@ SOURCES += src/qt/bitcoin.cpp src/qt/bitcoingui.cpp \
     src/qt/askpassphrasedialog.cpp \
     src/protocol.cpp \
     src/qt/notificator.cpp \
-    src/qt/qtipcserver.cpp
+    src/qt/qtipcserver.cpp \
+    src/qt/rpcconsole.cpp \
+    src/qt/verifymessagedialog.cpp
 
 RESOURCES += \
     src/qt/bitcoin.qrc
@@ -226,7 +232,9 @@ FORMS += \
     src/qt/forms/transactiondescdialog.ui \
     src/qt/forms/overviewpage.ui \
     src/qt/forms/sendcoinsentry.ui \
-    src/qt/forms/askpassphrasedialog.ui
+    src/qt/forms/askpassphrasedialog.ui \
+    src/qt/forms/rpcconsole.ui \
+    src/qt/forms/verifymessagedialog.ui
 
 contains(USE_QRCODE, 1) {
 HEADERS += src/qt/qrcodedialog.h
@@ -254,19 +262,18 @@ isEmpty(QMAKE_LRELEASE) {
     win32:QMAKE_LRELEASE = $$[QT_INSTALL_BINS]\\lrelease.exe
     else:QMAKE_LRELEASE = $$[QT_INSTALL_BINS]/lrelease
 }
-isEmpty(TS_DIR):TS_DIR = src/qt/locale
+isEmpty(QM_DIR):QM_DIR = $$PWD/src/qt/locale
 # automatically build translations, so they can be included in resource file
 TSQM.name = lrelease ${QMAKE_FILE_IN}
 TSQM.input = TRANSLATIONS
-TSQM.output = $$TS_DIR/${QMAKE_FILE_BASE}.qm
-TSQM.commands = $$QMAKE_LRELEASE ${QMAKE_FILE_IN}
+TSQM.output = $$QM_DIR/${QMAKE_FILE_BASE}.qm
+TSQM.commands = $$QMAKE_LRELEASE ${QMAKE_FILE_IN} -qm ${QMAKE_FILE_OUT}
 TSQM.CONFIG = no_link
 QMAKE_EXTRA_COMPILERS += TSQM
-PRE_TARGETDEPS += compiler_TSQM_make_all
 
 # "Other files" to show in Qt Creator
 OTHER_FILES += \
-    doc/*.rst doc/*.txt doc/README README.md
+    doc/*.rst doc/*.txt doc/README README.md res/bitcoin-qt.rc
 
 # platform specific defaults, if not overridden on command line
 isEmpty(BOOST_LIB_SUFFIX) {

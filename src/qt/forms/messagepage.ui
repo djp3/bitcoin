@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Message</string>
+   <string>Sign Message Dialog</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
@@ -101,9 +101,6 @@
        <italic>true</italic>
       </font>
      </property>
-     <property name="text">
-      <string>Click &quot;Sign Message&quot; to get signature</string>
-     </property>
      <property name="readOnly">
       <bool>true</bool>
      </property>
@@ -131,11 +128,25 @@
         <string>Copy the current signature to the system clipboard</string>
        </property>
        <property name="text">
-        <string>&amp;Copy to Clipboard</string>
+        <string>&amp;Copy Signature</string>
        </property>
        <property name="icon">
         <iconset resource="../bitcoin.qrc">
          <normaloff>:/icons/editcopy</normaloff>:/icons/editcopy</iconset>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="clearButton">
+       <property name="toolTip">
+        <string>Reset all sign message fields</string>
+       </property>
+       <property name="text">
+        <string>Clear &amp;All</string>
+       </property>
+       <property name="icon">
+        <iconset resource="../bitcoin.qrc">
+         <normaloff>:/icons/remove</normaloff>:/icons/remove</iconset>
        </property>
       </widget>
      </item>

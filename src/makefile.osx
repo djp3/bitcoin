@@ -53,7 +53,7 @@ LIBS += \
 TESTDEFS += -DBOOST_TEST_DYN_LINK
 endif
 
-DEFS=-DMAC_OSX -DMSG_NOSIGNAL=0
+DEFS=-DMAC_OSX -DMSG_NOSIGNAL=0 -DUSE_IPV6
 
 ifdef RELEASE
 # Compile for maximum compatibility and smallest size.
@@ -65,7 +65,7 @@ CFLAGS = -g
 endif
 
 # ppc doesn't work because we don't support big-endian
-CFLAGS += -Wextra -Wno-sign-compare -Wno-invalid-offsetof -Wformat-security \
+CFLAGS += -Wall -Wextra -Wformat -Wformat-security -Wno-unused-parameter \
     $(DEBUGFLAGS) $(DEFS) $(INCLUDEPATHS)
 
 OBJS= \
@@ -85,6 +85,7 @@ OBJS= \
     obj/bitcoinrpc.o \
     obj/rpcdump.o \
     obj/script.o \
+    obj/sync.o \
     obj/util.o \
     obj/wallet.o \
     obj/walletdb.o \

@@ -6,6 +6,7 @@
 #define BITCOIN_MAIN_H
 
 #include "bignum.h"
+#include "sync.h"
 #include "net.h"
 #include "script.h"
 
@@ -36,7 +37,7 @@ static const int64 MAX_MONEY = 21000000 * COIN;
 inline bool MoneyRange(int64 nValue) { return (nValue >= 0 && nValue <= MAX_MONEY); }
 static const int COINBASE_MATURITY = 100;
 // Threshold for nLockTime: below this value it is interpreted as block number, otherwise as UNIX timestamp.
-static const int LOCKTIME_THRESHOLD = 500000000; // Tue Nov  5 00:53:20 1985 UTC
+static const unsigned int LOCKTIME_THRESHOLD = 500000000; // Tue Nov  5 00:53:20 1985 UTC
 #ifdef USE_UPNP
 static const int fHaveUPnP = true;
 #else
@@ -69,6 +70,7 @@ extern int64 nHPSTimerStart;
 extern int64 nTimeBestReceived;
 extern CCriticalSection cs_setpwalletRegistered;
 extern std::set<CWallet*> setpwalletRegistered;
+extern unsigned char pchMessageStart[4];
 
 // Settings
 extern int64 nTransactionFee;
@@ -91,6 +93,7 @@ bool LoadBlockIndex(bool fAllowNew=true);
 void PrintBlockTree();
 bool ProcessMessages(CNode* pfrom);
 bool SendMessages(CNode* pto, bool fSendTrickle);
+bool LoadExternalBlockFile(FILE* fileIn);
 void GenerateBitcoins(bool fGenerate, CWallet* pwallet);
 CBlock* CreateNewBlock(CReserveKey& reservekey);
 void IncrementExtraNonce(CBlock* pblock, CBlockIndex* pindexPrev, unsigned int& nExtraNonce);
@@ -101,7 +104,7 @@ unsigned int ComputeMinWork(unsigned int nBase, int64 nTime);
 int GetNumBlocksOfPeers();
 bool IsInitialBlockDownload();
 std::string GetWarnings(std::string strFor);
-
+bool GetTransaction(const uint256 &hash, CTransaction &tx, uint256 &hashBlock);
 
 
 
@@ -136,8 +139,8 @@ public:
     }
 
     IMPLEMENT_SERIALIZE( READWRITE(FLATDATA(*this)); )
-    void SetNull() { nFile = -1; nBlockPos = 0; nTxPos = 0; }
-    bool IsNull() const { return (nFile == -1); }
+    void SetNull() { nFile = (unsigned int) -1; nBlockPos = 0; nTxPos = 0; }
+    bool IsNull() const { return (nFile == (unsigned int) -1); }
 
     friend bool operator==(const CDiskTxPos& a, const CDiskTxPos& b)
     {
@@ -176,8 +179,8 @@ public:
 
     CInPoint() { SetNull(); }
     CInPoint(CTransaction* ptxIn, unsigned int nIn) { ptx = ptxIn; n = nIn; }
-    void SetNull() { ptx = NULL; n = -1; }
-    bool IsNull() const { return (ptx == NULL && n == -1); }
+    void SetNull() { ptx = NULL; n = (unsigned int) -1; }
+    bool IsNull() const { return (ptx == NULL && n == (unsigned int) -1); }
 };
 
 
@@ -192,8 +195,8 @@ public:
     COutPoint() { SetNull(); }
     COutPoint(uint256 hashIn, unsigned int nIn) { hash = hashIn; n = nIn; }
     IMPLEMENT_SERIALIZE( READWRITE(FLATDATA(*this)); )
-    void SetNull() { hash = 0; n = -1; }
-    bool IsNull() const { return (hash == 0 && n == -1); }
+    void SetNull() { hash = 0; n = (unsigned int) -1; }
+    bool IsNull() const { return (hash == 0 && n == (unsigned int) -1); }
 
     friend bool operator<(const COutPoint& a, const COutPoint& b)
     {

@@ -4,7 +4,7 @@
 
 USE_UPNP:=0
 
-DEFS=
+DEFS=-DUSE_IPV6
 
 DEFS += $(addprefix -I,$(CURDIR) $(CURDIR)/obj $(BOOST_INCLUDE_PATH) $(BDB_INCLUDE_PATH) $(OPENSSL_INCLUDE_PATH))
 LIBS = $(addprefix -L,$(BOOST_LIB_PATH) $(BDB_LIB_PATH) $(OPENSSL_LIB_PATH))
@@ -82,8 +82,10 @@ LIBS+= \
 
 
 DEBUGFLAGS=-g
-CXXFLAGS=-O2
-xCXXFLAGS=-pthread -Wall -Wextra -Wno-sign-compare -Wno-invalid-offsetof -Wno-unused-parameter -Wformat -Wformat-security \
+
+# CXXFLAGS can be specified on the make command line, so we use xCXXFLAGS that only
+# adds some defaults in front. Unfortunately, CXXFLAGS=... $(CXXFLAGS) does not work.
+xCXXFLAGS=-O2 -pthread -Wall -Wextra -Wformat -Wformat-security -Wno-unused-parameter \
     $(DEBUGFLAGS) $(DEFS) $(HARDENING) $(CXXFLAGS)
 
 OBJS= \
@@ -103,6 +105,7 @@ OBJS= \
     obj/bitcoinrpc.o \
     obj/rpcdump.o \
     obj/script.o \
+    obj/sync.o \
     obj/util.o \
     obj/wallet.o \
     obj/walletdb.o \

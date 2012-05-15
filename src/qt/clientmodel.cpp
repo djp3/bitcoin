@@ -5,6 +5,7 @@
 #include "transactiontablemodel.h"
 
 #include "main.h"
+static const int64 nClientStartupTime = GetTime();
 
 #include <QDateTime>
 
@@ -92,4 +93,14 @@ QString ClientModel::formatFullVersion() const
 QString ClientModel::formatBuildDate() const
 {
     return QString::fromStdString(CLIENT_DATE);
+}
+
+QString ClientModel::clientName() const
+{
+    return QString::fromStdString(CLIENT_NAME);
+}
+
+QDateTime ClientModel::formatClientStartupTime() const
+{
+    return QDateTime::fromTime_t(nClientStartupTime);
 }

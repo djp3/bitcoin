@@ -23,9 +23,9 @@ LIBS= \
  -l ssl \
  -l crypto
 
-DEFS=-DWIN32 -D_WINDOWS -DBOOST_THREAD_USE_LIB
+DEFS=-DWIN32 -D_WINDOWS -DBOOST_THREAD_USE_LIB -DUSE_IPV6
 DEBUGFLAGS=-g
-CFLAGS=-mthreads -O2 -w -Wno-invalid-offsetof -Wformat $(DEBUGFLAGS) $(DEFS) $(INCLUDEPATHS)
+CFLAGS=-mthreads -O2 -w -Wall -Wextra -Wformat -Wformat-security -Wno-unused-parameter $(DEBUGFLAGS) $(DEFS) $(INCLUDEPATHS)
 
 TESTDEFS = -DTEST_DATA_DIR=$(abspath test/data)
 
@@ -58,6 +58,7 @@ OBJS= \
     obj/bitcoinrpc.o \
     obj/rpcdump.o \
     obj/script.o \
+    obj/sync.o \
     obj/util.o \
     obj/wallet.o \
     obj/walletdb.o \

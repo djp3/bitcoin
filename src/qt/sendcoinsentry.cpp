@@ -20,10 +20,10 @@ SendCoinsEntry::SendCoinsEntry(QWidget *parent) :
 #ifdef Q_WS_MAC
     ui->payToLayout->setSpacing(4);
 #endif
-
 #if QT_VERSION >= 0x040700
-    ui->payTo->setPlaceholderText(tr("Enter a Bitcoin address (e.g. 1NS17iag9jJgTHD1VXjvLCEnZuQ3rJDE9L)"));
+    /* Do not move this to the XML file, Qt before 4.7 will choke on it */
     ui->addAsLabel->setPlaceholderText(tr("Enter a label for this address to add it to your address book"));
+    ui->payTo->setPlaceholderText(tr("Enter a Bitcoin address (e.g. 1NS17iag9jJgTHD1VXjvLCEnZuQ3rJDE9L)"));
 #endif
     setFocusPolicy(Qt::TabFocus);
     setFocusProxy(ui->payTo);
