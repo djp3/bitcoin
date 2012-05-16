@@ -20,6 +20,10 @@ void ipcShutdown()
     message_queue::remove(BITCOINURI_QUEUE_NAME);
 }
 
+	//Commented this out to avoid a compile bug since this never gets into
+	//the control flow
+	//-djp3
+	/*
 void ipcThread(void* parg)
 {
     message_queue* mq = (message_queue*)parg;
@@ -42,6 +46,7 @@ void ipcThread(void* parg)
     }
     ipcShutdown();
 }
+*/
 
 void ipcInit()
 {
@@ -55,6 +60,10 @@ void ipcInit()
     // problems.
     return;
 #endif
+	//Commented this out to avoid a compile bug since this never gets into
+	//the control flow
+	//-djp3
+/*
 
     message_queue* mq;
     char strBuf[257];
@@ -86,4 +95,5 @@ void ipcInit()
     {
         delete mq;
     }
+*/
 }
