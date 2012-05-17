@@ -285,7 +285,6 @@ public:
     bool ReadDiskTx(COutPoint outpoint, CTransaction& tx, CTxIndex& txindex);
     bool ReadDiskTx(COutPoint outpoint, CTransaction& tx);
     bool WriteBlockIndex(const CDiskBlockIndex& blockindex);
-    bool EraseBlockIndex(uint256 hash);
     bool ReadHashBestChain(uint256& hashBestChain);
     bool WriteHashBestChain(uint256 hashBestChain);
     bool ReadBestInvalidWork(CBigNum& bnBestInvalidWork);
@@ -296,20 +295,15 @@ public:
 
 
 
-/** Access to the (IP) address database (addr.dat) */
-class CAddrDB : public CDB
+/** Access to the (IP) address database (peers.dat) */
+class CAddrDB
 {
-public:
-    CAddrDB(const char* pszMode="r+") : CDB("addr.dat", pszMode) { }
 private:
-    CAddrDB(const CAddrDB&);
-    void operator=(const CAddrDB&);
+    boost::filesystem::path pathAddr;
 public:
-    bool WriteAddrman(const CAddrMan& addr);
-    bool LoadAddresses();
+    CAddrDB();
+    bool Write(const CAddrMan& addr);
+    bool Read(CAddrMan& addr);
 };
-
-bool LoadAddresses();
-
 
 #endif // BITCOIN_DB_H

@@ -10,10 +10,6 @@
 #include "net.h"
 #include "script.h"
 
-#ifdef WIN32
-#include <io.h> /* for _commit */
-#endif
-
 #include <list>
 
 class CWallet;
@@ -956,13 +952,7 @@ public:
         // Flush stdio buffers and commit to disk before returning
         fflush(fileout);
         if (!IsInitialBlockDownload() || (nBestHeight+1) % 500 == 0)
-        {
-#ifdef WIN32
-            _commit(_fileno(fileout));
-#else
-            fsync(fileno(fileout));
-#endif
-        }
+            FileCommit(fileout);
 
         return true;
     }
@@ -1128,21 +1118,6 @@ public:
     bool CheckIndex() const
     {
         return CheckProofOfWork(GetBlockHash(), nBits);
-    }
-
-    bool EraseBlockFromDisk()
-    {
-        // Open history file
-        CAutoFile fileout = CAutoFile(OpenBlockFile(nFile, nBlockPos, "rb+"), SER_DISK, CLIENT_VERSION);
-        if (!fileout)
-            return false;
-
-        // Overwrite with empty null block
-        CBlock block;
-        block.SetNull();
-        fileout << block;
-
-        return true;
     }
 
     enum { nMedianTimeSpan=11 };
