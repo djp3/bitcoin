@@ -24,7 +24,7 @@ void OptionsModel::Init()
     nTransactionFee = settings.value("nTransactionFee").toLongLong();
     language = settings.value("language", "").toString();
 
-    // These are shared with core bitcoin; we want
+    // These are shared with core Bitcoin; we want
     // command-line options to override the GUI settings:
     if (settings.contains("fUseUPnP"))
         SoftSetBoolArg("-upnp", settings.value("fUseUPnP").toBool());
@@ -128,7 +128,7 @@ QVariant OptionsModel::data(const QModelIndex & index, int role) const
         case DisplayAddresses:
             return QVariant(bDisplayAddresses);
         case DetachDatabases:
-            return QVariant(fDetachDB);
+            return QVariant(bitdb.GetDetach());
         case Language:
             return settings.value("language", "");
         default:
@@ -215,7 +215,8 @@ bool OptionsModel::setData(const QModelIndex & index, const QVariant & value, in
             }
             break;
         case DetachDatabases: {
-            fDetachDB = value.toBool();
+            bool fDetachDB = value.toBool();
+            bitdb.SetDetach(fDetachDB);
             settings.setValue("detachDB", fDetachDB);
             }
             break;

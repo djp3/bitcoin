@@ -1,24 +1,21 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
-// file license.txt or http://www.opensource.org/licenses/mit-license.php.
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #ifndef BITCOIN_SYNC_H
 #define BITCOIN_SYNC_H
 
-#include "util.h"
-#include <boost/interprocess/sync/interprocess_recursive_mutex.hpp>
-#include <boost/interprocess/sync/scoped_lock.hpp>
-#include <boost/interprocess/sync/interprocess_semaphore.hpp>
-#include <boost/interprocess/sync/lock_options.hpp>
-
-
+#include <boost/thread/mutex.hpp>
+#include <boost/thread/recursive_mutex.hpp>
+#include <boost/thread/locks.hpp>
+#include <boost/thread/condition_variable.hpp>
 
 
 /** Wrapped boost mutex: supports recursive locking, but no waiting  */
-typedef boost::interprocess::interprocess_recursive_mutex CCriticalSection;
+typedef boost::recursive_mutex CCriticalSection;
 
 /** Wrapped boost mutex: supports waiting but not recursive locking */
-typedef boost::interprocess::interprocess_mutex CWaitableCriticalSection;
+typedef boost::mutex CWaitableCriticalSection;
 
 #ifdef DEBUG_LOCKORDER
 void EnterCritical(const char* pszName, const char* pszFile, int nLine, void* cs, bool fTry = false);
@@ -33,12 +30,12 @@ template<typename Mutex>
 class CMutexLock
 {
 private:
-    boost::interprocess::scoped_lock<Mutex> lock;
+    boost::unique_lock<Mutex> lock;
 public:
 
     void Enter(const char* pszName, const char* pszFile, int nLine)
     {
-        if (!lock.owns())
+        if (!lock.owns_lock())
         {
             EnterCritical(pszName, pszFile, nLine, (void*)(lock.mutex()));
 #ifdef DEBUG_LOCKCONTENTION
@@ -56,7 +53,7 @@ public:
 
     void Leave()
     {
-        if (lock.owns())
+        if (lock.owns_lock())
         {
             lock.unlock();
             LeaveCritical();
@@ -65,17 +62,17 @@ public:
 
     bool TryEnter(const char* pszName, const char* pszFile, int nLine)
     {
-        if (!lock.owns())
+        if (!lock.owns_lock())
         {
             EnterCritical(pszName, pszFile, nLine, (void*)(lock.mutex()), true);
             lock.try_lock();
-            if (!lock.owns())
+            if (!lock.owns_lock())
                 LeaveCritical();
         }
-        return lock.owns();
+        return lock.owns_lock();
     }
 
-    CMutexLock(Mutex& mutexIn, const char* pszName, const char* pszFile, int nLine, bool fTry = false) : lock(mutexIn, boost::interprocess::defer_lock)
+    CMutexLock(Mutex& mutexIn, const char* pszName, const char* pszFile, int nLine, bool fTry = false) : lock(mutexIn, boost::defer_lock)
     {
         if (fTry)
             TryEnter(pszName, pszFile, nLine);
@@ -85,16 +82,16 @@ public:
 
     ~CMutexLock()
     {
-        if (lock.owns())
+        if (lock.owns_lock())
             LeaveCritical();
     }
 
     operator bool()
     {
-        return lock.owns();
+        return lock.owns_lock();
     }
 
-    boost::interprocess::scoped_lock<Mutex> &GetLock()
+    boost::unique_lock<Mutex> &GetLock()
     {
         return lock;
     }
@@ -118,47 +115,40 @@ typedef CMutexLock<CCriticalSection> CCriticalBlock;
         LeaveCritical(); \
     }
 
-#ifdef MAC_OSX
-// boost::interprocess::interprocess_semaphore seems to spinlock on OSX; prefer polling instead
 class CSemaphore
 {
 private:
-    CCriticalSection cs;
-    int val;
+    boost::condition_variable condition;
+    boost::mutex mutex;
+    int value;
 
 public:
-    CSemaphore(int init) : val(init) {}
+    CSemaphore(int init) : value(init) {}
 
     void wait() {
-        do {
-            {
-                LOCK(cs);
-                if (val>0) {
-                    val--;
-                    return;
-                }
-            }
-            Sleep(100);
-        } while(1);
+        boost::unique_lock<boost::mutex> lock(mutex);
+        while (value < 1) {
+            condition.wait(lock);
+        }
+        value--;
     }
 
     bool try_wait() {
-        LOCK(cs);
-        if (val>0) {
-            val--;
-            return true;
-        }
-        return false;
+        boost::unique_lock<boost::mutex> lock(mutex);
+        if (value < 1)
+            return false;
+        value--;
+        return true;
     }
 
     void post() {
-        LOCK(cs);
-        val++;
+        {
+            boost::unique_lock<boost::mutex> lock(mutex);
+            value++;
+        }
+        condition.notify_one();
     }
 };
-#else
-typedef boost::interprocess::interprocess_semaphore CSemaphore;
-#endif
 
 /** RAII-style semaphore lock */
 class CSemaphoreGrant

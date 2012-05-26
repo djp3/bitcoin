@@ -109,7 +109,9 @@ RPCConsole::RPCConsole(QWidget *parent) :
 {
     ui->setupUi(this);
 
-#ifndef WIN32
+#ifdef WIN32
+    ui->openDebugLogfileButton->setIcon(QIcon(":/icons/export"));
+#else
     // Show Debug logfile label and Open button only for Windows
     ui->labelDebugLogfile->setVisible(false);
     ui->openDebugLogfileButton->setVisible(false);
@@ -155,7 +157,7 @@ void RPCConsole::setClientModel(ClientModel *model)
     {
         // Subscribe to information, replies, messages, errors
         connect(model, SIGNAL(numConnectionsChanged(int)), this, SLOT(setNumConnections(int)));
-        connect(model, SIGNAL(numBlocksChanged(int)), this, SLOT(setNumBlocks(int)));
+        connect(model, SIGNAL(numBlocksChanged(int,int)), this, SLOT(setNumBlocks(int,int)));
 
         // Provide initial values
         ui->clientVersion->setText(model->formatFullVersion());
@@ -166,7 +168,7 @@ void RPCConsole::setClientModel(ClientModel *model)
         setNumConnections(model->getNumConnections());
         ui->isTestNet->setChecked(model->isTestNet());
 
-        setNumBlocks(model->getNumBlocks());
+        setNumBlocks(model->getNumBlocks(), model->getNumBlocksOfPeers());
     }
 }
 
@@ -207,9 +209,9 @@ void RPCConsole::clear()
                 "b { color: #006060; } "
                 );
 
-    message(CMD_REPLY, tr("Welcome to the Bitcoin RPC console.<br>"
-                          "Use up and down arrows to navigate history, and <b>Ctrl-L</b> to clear screen.<br>"
-                          "Type <b>help</b> for an overview of available commands."), true);
+    message(CMD_REPLY, (tr("Welcome to the Bitcoin RPC console.") + "<br>" +
+                        tr("Use up and down arrows to navigate history, and <b>Ctrl-L</b> to clear screen.") + "<br>" +
+                        tr("Type <b>help</b> for an overview of available commands.")), true);
 }
 
 void RPCConsole::message(int category, const QString &message, bool html)
@@ -233,9 +235,10 @@ void RPCConsole::setNumConnections(int count)
     ui->numberOfConnections->setText(QString::number(count));
 }
 
-void RPCConsole::setNumBlocks(int count)
+void RPCConsole::setNumBlocks(int count, int countOfPeers)
 {
     ui->numberOfBlocks->setText(QString::number(count));
+    ui->totalBlocks->setText(QString::number(countOfPeers));
     if(clientModel)
     {
         // If there is no current number available display N/A instead of 0, which can't ever be true
