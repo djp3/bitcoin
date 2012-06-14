@@ -1875,7 +1875,7 @@ bool CheckDiskSpace(uint64 nAdditionalBytes)
         strMiscWarning = strMessage;
         printf("*** %s\n", strMessage.c_str());
         uiInterface.ThreadSafeMessageBox(strMessage, "Bitcoin", CClientUIInterface::OK | CClientUIInterface::ICON_EXCLAMATION | CClientUIInterface::MODAL);
-        uiInterface.QueueShutdown();
+        StartShutdown();
         return false;
     }
     return true;
@@ -3013,8 +3013,9 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
         // Keep-alive ping. We send a nonce of zero because we don't use it anywhere
         // right now.
         if (pto->nLastSend && GetTime() - pto->nLastSend > 30 * 60 && pto->vSend.empty()) {
+            uint64 nonce = 0;
             if (pto->nVersion > BIP0031_VERSION)
-                pto->PushMessage("ping", 0);
+                pto->PushMessage("ping", nonce);
             else
                 pto->PushMessage("ping");
         }
