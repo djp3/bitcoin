@@ -61,7 +61,6 @@ public:
 class CWallet : public CCryptoKeyStore
 {
 private:
-    void AvailableCoins(std::vector<COutput>& vCoins) const;
     bool SelectCoins(int64 nTargetValue, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet) const;
 
     CWalletDB *pwalletdbEncryption;
@@ -69,7 +68,7 @@ private:
     // the current wallet version: clients below this version are not able to load the wallet
     int nWalletVersion;
 
-    // the maxmimum wallet format version: memory-only variable that specifies to what version this wallet may be upgraded
+    // the maximum wallet format version: memory-only variable that specifies to what version this wallet may be upgraded
     int nWalletMaxVersion;
 
 public:
@@ -113,6 +112,7 @@ public:
     // check whether we are allowed to upgrade (or already support) to the named feature
     bool CanSupportFeature(enum WalletFeature wf) { return nWalletMaxVersion >= wf; }
 
+    void AvailableCoins(std::vector<COutput>& vCoins, bool fOnlyConfirmed=true) const;
     bool SelectCoinsMinConf(int64 nTargetValue, int nConfMine, int nConfTheirs, std::vector<COutput> vCoins, std::set<std::pair<const CWalletTx*,unsigned int> >& setCoinsRet, int64& nValueRet) const;
 
     // keystore implementation
