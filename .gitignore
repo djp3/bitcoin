@@ -32,3 +32,4 @@ build
 src/djp3Makeit.sh
 Bitcoin-Qt.app/*
 Bitcoin-Qt.dmg
+doc/doxygen

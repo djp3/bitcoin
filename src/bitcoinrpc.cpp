@@ -425,17 +425,6 @@ Value getblockbycount(const Array& params, bool fHelp)
 }
 
 
-Value getconnectioncount(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 0)
-        throw runtime_error(
-            "getconnectioncount\n"
-            "Returns the number of connections to other nodes.");
-
-    return (int)vNodes.size();
-}
-
-
 Value getdifficulty(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() != 0)

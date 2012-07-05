@@ -11,6 +11,8 @@
 #include <boost/thread/condition_variable.hpp>
 
 
+
+
 /** Wrapped boost mutex: supports recursive locking, but no waiting  */
 typedef boost::recursive_mutex CCriticalSection;
 
