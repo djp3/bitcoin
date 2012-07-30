@@ -25,6 +25,8 @@ static void ipcThread2(void* pArg);
 // URI handling not implemented on OSX yet
 
 void ipcInit() { }
+static void ipcThread(void* pArg){}
+static void ipcThread2(void* pArg){}
 
 #else
 
