@@ -86,6 +86,8 @@ void locking_callback(int mode, int i, const char* file, int line)
     }
 }
 
+LockedPageManager LockedPageManager::instance;
+
 // Init
 class CInit
 {
@@ -204,7 +206,7 @@ inline int OutputDebugStringF(const char* pszFormat, ...)
         ret = vprintf(pszFormat, arg_ptr);
         va_end(arg_ptr);
     }
-    else
+    else if (!fPrintToDebugger)
     {
         // print to debug.log
         static FILE* fileout = NULL;
@@ -348,7 +350,7 @@ string FormatMoney(int64 n, bool fPlus)
     int64 remainder = n_abs%COIN;
     string str = strprintf("%"PRI64d".%08"PRI64d, quotient, remainder);
 
-    // Right-trim excess 0's before the decimal point:
+    // Right-trim excess zeros before the decimal point:
     int nTrim = 0;
     for (int i = str.size()-1; (str[i] == '0' && isdigit(str[i-2])); --i)
         ++nTrim;
@@ -1205,7 +1207,7 @@ void AddTimeData(const CNetAddr& ip, int64 nTime)
                 if (!fMatch)
                 {
                     fDone = true;
-                    string strMessage = _("Warning: Please check that your computer's date and time are correct.  If your clock is wrong Bitcoin will not work properly.");
+                    string strMessage = _("Warning: Please check that your computer's date and time are correct! If your clock is wrong Bitcoin will not work properly.");
                     strMiscWarning = strMessage;
                     printf("*** %s\n", strMessage.c_str());
                     uiInterface.ThreadSafeMessageBox(strMessage+" ", string("Bitcoin"), CClientUIInterface::OK | CClientUIInterface::ICON_EXCLAMATION);
@@ -1287,8 +1289,11 @@ void RenameThread(const char* name)
     //       on FreeBSD or OpenBSD first. When verified the '0 &&' part can be
     //       removed.
     pthread_set_name_np(pthread_self(), name);
-#elif defined(MAC_OSX)
-    pthread_setname_np(name);
+
+// This is XCode 10.6-and-later; bring back if we drop 10.5 support:
+// #elif defined(MAC_OSX)
+//    pthread_setname_np(name);
+
 #else
     // Prevent warnings for unused parameters...
     (void)name;

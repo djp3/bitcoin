@@ -27,6 +27,7 @@ static const unsigned int MAX_BLOCK_SIZE = 1000000;
 static const unsigned int MAX_BLOCK_SIZE_GEN = MAX_BLOCK_SIZE/2;
 static const unsigned int MAX_BLOCK_SIGOPS = MAX_BLOCK_SIZE/50;
 static const unsigned int MAX_ORPHAN_TRANSACTIONS = MAX_BLOCK_SIZE/100;
+static const unsigned int MAX_INV_SZ = 50000;
 static const int64 MIN_TX_FEE = 00000;
 static const int64 MIN_RELAY_TX_FEE = 00000;
 static const int64 MAX_MONEY = 21000000 * COIN;
@@ -88,6 +89,7 @@ FILE* OpenBlockFile(unsigned int nFile, unsigned int nBlockPos, const char* pszM
 FILE* AppendBlockFile(unsigned int& nFileRet);
 bool LoadBlockIndex(bool fAllowNew=true);
 void PrintBlockTree();
+CBlockIndex* FindBlockByHeight(int nHeight);
 bool ProcessMessages(CNode* pfrom);
 bool SendMessages(CNode* pto, bool fSendTrickle);
 bool LoadExternalBlockFile(FILE* fileIn);
@@ -552,7 +554,7 @@ public:
             if (nBlockSize == 1)
             {
                 // Transactions under 10K are free
-                // (about 4500bc if made of 50bc inputs)
+                // (about 4500 BTC if made of 50 BTC inputs)
                 if (nBytes < 10000)
                     nMinFee = 0;
             }
@@ -818,7 +820,7 @@ class CBlock
 {
 public:
     // header
-    static const int CURRENT_VERSION=1;
+    static const int CURRENT_VERSION=2;
     int nVersion;
     uint256 hashPrevBlock;
     uint256 hashMerkleRoot;
@@ -1162,6 +1164,12 @@ public:
         return pindex->GetMedianTimePast();
     }
 
+    /**
+     * Returns true if there are nRequired or more blocks of minVersion or above
+     * in the last nToCheck blocks, starting at pstart and going backwards.
+     */
+    static bool IsSuperMajority(int minVersion, const CBlockIndex* pstart,
+                                unsigned int nRequired, unsigned int nToCheck);
 
 
     std::string ToString() const
@@ -1527,7 +1535,7 @@ public:
 
     uint256 GetHash() const
     {
-        return SerializeHash(*this);
+        return Hash(this->vchMsg.begin(), this->vchMsg.end());
     }
 
     bool IsInEffect() const

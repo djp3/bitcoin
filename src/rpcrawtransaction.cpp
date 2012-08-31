@@ -18,15 +18,7 @@ using namespace boost;
 using namespace boost::assign;
 using namespace json_spirit;
 
-// These are all in bitcoinrpc.cpp:
-extern Object JSONRPCError(int code, const string& message);
-extern int64 AmountFromValue(const Value& value);
-extern Value ValueFromAmount(int64 amount);
-extern std::string HelpRequiringPassphrase();
-extern void EnsureWalletIsUnlocked();
-
-void
-ScriptPubKeyToJSON(const CScript& scriptPubKey, Object& out)
+void ScriptPubKeyToJSON(const CScript& scriptPubKey, Object& out)
 {
     txnouttype type;
     vector<CTxDestination> addresses;
@@ -50,8 +42,7 @@ ScriptPubKeyToJSON(const CScript& scriptPubKey, Object& out)
     out.push_back(Pair("addresses", a));
 }
 
-void
-TxToJSON(const CTransaction& tx, const uint256 hashBlock, Object& entry)
+void TxToJSON(const CTransaction& tx, const uint256 hashBlock, Object& entry)
 {
     entry.push_back(Pair("txid", tx.GetHash().GetHex()));
     entry.push_back(Pair("version", tx.nVersion));
@@ -100,6 +91,7 @@ TxToJSON(const CTransaction& tx, const uint256 hashBlock, Object& entry)
             {
                 entry.push_back(Pair("confirmations", 1 + nBestHeight - pindex->nHeight));
                 entry.push_back(Pair("time", (boost::int64_t)pindex->nTime));
+                entry.push_back(Pair("blocktime", (boost::int64_t)pindex->nTime));
             }
             else
                 entry.push_back(Pair("confirmations", 0));
@@ -144,23 +136,39 @@ Value getrawtransaction(const Array& params, bool fHelp)
 
 Value listunspent(const Array& params, bool fHelp)
 {
-    if (fHelp || params.size() > 2)
+    if (fHelp || params.size() > 3)
         throw runtime_error(
-            "listunspent [minconf=1] [maxconf=999999]\n"
+            "listunspent [minconf=1] [maxconf=9999999]  [\"address\",...]\n"
             "Returns array of unspent transaction outputs\n"
             "with between minconf and maxconf (inclusive) confirmations.\n"
+            "Optionally filtered to only include txouts paid to specified addresses.\n"
             "Results are an array of Objects, each of which has:\n"
             "{txid, vout, scriptPubKey, amount, confirmations}");
 
-    RPCTypeCheck(params, list_of(int_type)(int_type));
+    RPCTypeCheck(params, list_of(int_type)(int_type)(array_type));
 
     int nMinDepth = 1;
     if (params.size() > 0)
         nMinDepth = params[0].get_int();
 
-    int nMaxDepth = 999999;
+    int nMaxDepth = 9999999;
     if (params.size() > 1)
         nMaxDepth = params[1].get_int();
+
+    set<CBitcoinAddress> setAddress;
+    if (params.size() > 2)
+    {
+        Array inputs = params[2].get_array();
+        BOOST_FOREACH(Value& input, inputs)
+        {
+            CBitcoinAddress address(input.get_str());
+            if (!address.IsValid())
+                throw JSONRPCError(-5, string("Invalid Bitcoin address: ")+input.get_str());
+            if (setAddress.count(address))
+                throw JSONRPCError(-8, string("Invalid parameter, duplicated address: ")+input.get_str());
+           setAddress.insert(address);
+        }
+    }
 
     Array results;
     vector<COutput> vecOutputs;
@@ -169,6 +177,16 @@ Value listunspent(const Array& params, bool fHelp)
     {
         if (out.nDepth < nMinDepth || out.nDepth > nMaxDepth)
             continue;
+
+        if(setAddress.size())
+        {
+            CTxDestination address;
+            if(!ExtractDestination(out.tx->vout[out.i].scriptPubKey, address))
+                continue;
+
+            if (!setAddress.count(address))
+                continue;
+        }
 
         int64 nValue = out.tx->vout[out.i].nValue;
         const CScript& pk = out.tx->vout[out.i].scriptPubKey;
@@ -230,7 +248,7 @@ Value createrawtransaction(const Array& params, bool fHelp)
     {
         CBitcoinAddress address(s.name_);
         if (!address.IsValid())
-            throw JSONRPCError(-5, string("Invalid Bitcoin address:")+s.name_);
+            throw JSONRPCError(-5, string("Invalid Bitcoin address: ")+s.name_);
 
         if (setAddress.count(address))
             throw JSONRPCError(-8, string("Invalid parameter, duplicated address: ")+s.name_);
@@ -280,21 +298,18 @@ Value signrawtransaction(const Array& params, bool fHelp)
         throw runtime_error(
             "signrawtransaction <hex string> [{\"txid\":txid,\"vout\":n,\"scriptPubKey\":hex},...] [<privatekey1>,...] [sighashtype=\"ALL\"]\n"
             "Sign inputs for raw transaction (serialized, hex-encoded).\n"
-            "Second optional argument is an array of previous transaction outputs that\n"
+            "Second optional argument (may be null) is an array of previous transaction outputs that\n"
             "this transaction depends on but may not yet be in the blockchain.\n"
-            "Third optional argument is an array of base58-encoded private\n"
+            "Third optional argument (may be null) is an array of base58-encoded private\n"
             "keys that, if given, will be the only keys used to sign the transaction.\n"
-            "Fourth option is a string that is one of six values; ALL, NONE, SINGLE or\n"
+            "Fourth optional argument is a string that is one of six values; ALL, NONE, SINGLE or\n"
             "ALL|ANYONECANPAY, NONE|ANYONECANPAY, SINGLE|ANYONECANPAY.\n"
             "Returns json object with keys:\n"
             "  hex : raw transaction with signature(s) (hex-encoded string)\n"
             "  complete : 1 if transaction has a complete set of signature (0 if not)"
             + HelpRequiringPassphrase());
 
-    if (params.size() < 3)
-        EnsureWalletIsUnlocked();
-
-    RPCTypeCheck(params, list_of(str_type)(array_type)(array_type));
+    RPCTypeCheck(params, list_of(str_type)(array_type)(array_type)(str_type), true);
 
     vector<unsigned char> txData(ParseHex(params[0].get_str()));
     CDataStream ssData(txData, SER_NETWORK, PROTOCOL_VERSION);
@@ -321,24 +336,29 @@ Value signrawtransaction(const Array& params, bool fHelp)
 
     // Fetch previous transactions (inputs):
     map<COutPoint, CScript> mapPrevOut;
+    for (unsigned int i = 0; i < mergedTx.vin.size(); i++)
     {
+        CTransaction tempTx;
         MapPrevTx mapPrevTx;
         CTxDB txdb("r");
         map<uint256, CTxIndex> unused;
         bool fInvalid;
-        mergedTx.FetchInputs(txdb, unused, false, false, mapPrevTx, fInvalid);
+
+        // FetchInputs aborts on failure, so we go one at a time.
+        tempTx.vin.push_back(mergedTx.vin[i]);
+        tempTx.FetchInputs(txdb, unused, false, false, mapPrevTx, fInvalid);
 
         // Copy results into mapPrevOut:
-        BOOST_FOREACH(const CTxIn& txin, mergedTx.vin)
+        BOOST_FOREACH(const CTxIn& txin, tempTx.vin)
         {
             const uint256& prevHash = txin.prevout.hash;
-            if (mapPrevTx.count(prevHash))
+            if (mapPrevTx.count(prevHash) && mapPrevTx[prevHash].second.vout.size()>txin.prevout.n)
                 mapPrevOut[txin.prevout] = mapPrevTx[prevHash].second.vout[txin.prevout.n].scriptPubKey;
         }
     }
 
     // Add previous txouts given in the RPC call:
-    if (params.size() > 1)
+    if (params.size() > 1 && params[1].type() != null_type)
     {
         Array prevTxs = params[1].get_array();
         BOOST_FOREACH(Value& p, prevTxs)
@@ -385,7 +405,7 @@ Value signrawtransaction(const Array& params, bool fHelp)
 
     bool fGivenKeys = false;
     CBasicKeyStore tempKeystore;
-    if (params.size() > 2)
+    if (params.size() > 2 && params[2].type() != null_type)
     {
         fGivenKeys = true;
         Array keys = params[2].get_array();
@@ -402,10 +422,13 @@ Value signrawtransaction(const Array& params, bool fHelp)
             tempKeystore.AddKey(key);
         }
     }
+    else
+        EnsureWalletIsUnlocked();
+
     const CKeyStore& keystore = (fGivenKeys ? tempKeystore : *pwalletMain);
 
     int nHashType = SIGHASH_ALL;
-    if (params.size() > 3)
+    if (params.size() > 3 && params[3].type() != null_type)
     {
         static map<string, int> mapSigHashValues =
             boost::assign::map_list_of
@@ -423,6 +446,8 @@ Value signrawtransaction(const Array& params, bool fHelp)
             throw JSONRPCError(-8, "Invalid sighash param");
     }
 
+    bool fHashSingle = ((nHashType & ~SIGHASH_ANYONECANPAY) == SIGHASH_SINGLE);
+
     // Sign what we can:
     for (unsigned int i = 0; i < mergedTx.vin.size(); i++)
     {
@@ -435,7 +460,9 @@ Value signrawtransaction(const Array& params, bool fHelp)
         const CScript& prevPubKey = mapPrevOut[txin.prevout];
 
         txin.scriptSig.clear();
-        SignSignature(keystore, prevPubKey, mergedTx, i, nHashType);
+        // Only sign SIGHASH_SINGLE if there's a corresponding output:
+        if (!fHashSingle || (i < mergedTx.vout.size()))
+            SignSignature(keystore, prevPubKey, mergedTx, i, nHashType);
 
         // ... and merge in other signatures:
         BOOST_FOREACH(const CTransaction& txv, txVariants)

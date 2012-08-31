@@ -4,7 +4,6 @@
 #include "bitcoinunits.h"
 #include "util.h"
 #include "init.h"
-#include "base58.h"
 
 #include <QString>
 #include <QDateTime>
@@ -81,11 +80,6 @@ bool parseBitcoinURI(const QUrl &uri, SendCoinsRecipient *out)
     if(uri.scheme() != QString("bitcoin"))
         return false;
 
-    // check if the address is valid
-    CBitcoinAddress addressFromUri(uri.path().toStdString());
-    if (!addressFromUri.IsValid())
-        return false;
-
     SendCoinsRecipient rv;
     rv.address = uri.path();
     rv.amount = 0;
@@ -131,7 +125,7 @@ bool parseBitcoinURI(QString uri, SendCoinsRecipient *out)
     // Convert bitcoin:// to bitcoin:
     //
     //    Cannot handle this later, because bitcoin:// will cause Qt to see the part after // as host,
-    //    which will lowercase it (and thus invalidate the address).
+    //    which will lower-case it (and thus invalidate the address).
     if(uri.startsWith("bitcoin://"))
     {
         uri.replace(0, 10, "bitcoin:");
@@ -436,7 +430,7 @@ HelpMessageBox::HelpMessageBox(QWidget *parent) :
 
     setWindowTitle(tr("Bitcoin-Qt"));
     setTextFormat(Qt::PlainText);
-    // setMinimumWidth is ignored for QMessageBox so put in nonbreaking spaces to make it wider.
+    // setMinimumWidth is ignored for QMessageBox so put in non-breaking spaces to make it wider.
     setText(header + QString(QChar(0x2003)).repeated(50));
     setDetailedText(coreOptions + "\n" + uiOptions);
 }
@@ -451,7 +445,7 @@ void HelpMessageBox::printToConsole()
 void HelpMessageBox::showOrPrint()
 {
 #if defined(WIN32)
-        // On windows, show a message box, as there is no stderr/stdout in windowed applications
+        // On Windows, show a message box, as there is no stderr/stdout in windowed applications
         exec();
 #else
         // On other operating systems, print help text to console

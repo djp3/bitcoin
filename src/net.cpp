@@ -233,8 +233,8 @@ bool AddLocal(const CService& addr, int nScore)
         bool fAlready = mapLocalHost.count(addr) > 0;
         LocalServiceInfo &info = mapLocalHost[addr];
         if (!fAlready || nScore >= info.nScore) {
-            info.nScore = nScore;
-            info.nPort = addr.GetPort() + (fAlready ? 1 : 0);
+            info.nScore = nScore + (fAlready ? 1 : 0);
+            info.nPort = addr.GetPort();
         }
         SetReachable(addr.GetNetwork());
     }
@@ -357,7 +357,7 @@ bool GetMyExternalIP(CNetAddr& ipRet)
     {
         // We should be phasing out our use of sites like these.  If we need
         // replacements, we should ask for volunteers to put this simple
-        // php file on their webserver that prints the client IP:
+        // php file on their web server that prints the client IP:
         //  <?php echo $_SERVER["REMOTE_ADDR"]; ?>
         if (nHost == 1)
         {
@@ -497,14 +497,14 @@ CNode* ConnectNode(CAddress addrConnect, const char *pszDest, int64 nTimeout)
         /// debug print
         printf("connected %s\n", pszDest ? pszDest : addrConnect.ToString().c_str());
 
-        // Set to nonblocking
+        // Set to non-blocking
 #ifdef WIN32
         u_long nOne = 1;
         if (ioctlsocket(hSocket, FIONBIO, &nOne) == SOCKET_ERROR)
-            printf("ConnectSocket() : ioctlsocket nonblocking setting failed, error %d\n", WSAGetLastError());
+            printf("ConnectSocket() : ioctlsocket non-blocking setting failed, error %d\n", WSAGetLastError());
 #else
         if (fcntl(hSocket, F_SETFL, O_NONBLOCK) == SOCKET_ERROR)
-            printf("ConnectSocket() : fcntl nonblocking setting failed, error %d\n", errno);
+            printf("ConnectSocket() : fcntl non-blocking setting failed, error %d\n", errno);
 #endif
 
         // Add node
@@ -589,7 +589,7 @@ bool CNode::Misbehaving(int howmuch)
 {
     if (addr.IsLocal())
     {
-        printf("Warning: local node %s misbehaving\n", addrName.c_str());
+        printf("Warning: Local node %s misbehaving (delta: %d)!\n", addrName.c_str(), howmuch);
         return false;
     }
 
@@ -597,15 +597,16 @@ bool CNode::Misbehaving(int howmuch)
     if (nMisbehavior >= GetArg("-banscore", 100))
     {
         int64 banTime = GetTime()+GetArg("-bantime", 60*60*24);  // Default 24-hour ban
+        printf("Misbehaving: %s (%d -> %d) DISCONNECTING\n", addr.ToString().c_str(), nMisbehavior-howmuch, nMisbehavior);
         {
             LOCK(cs_setBanned);
             if (setBanned[addr] < banTime)
                 setBanned[addr] = banTime;
         }
         CloseSocketDisconnect();
-        printf("Disconnected %s for misbehavior (score=%d)\n", addrName.c_str(), nMisbehavior);
         return true;
-    }
+    } else
+        printf("Misbehaving: %s (%d -> %d)\n", addr.ToString().c_str(), nMisbehavior-howmuch, nMisbehavior);
     return false;
 }
 
@@ -811,7 +812,7 @@ void ThreadSocketHandler2(void* parg)
 
             if (hSocket != INVALID_SOCKET)
                 if (!addr.SetSockAddr((const struct sockaddr*)&sockaddr))
-                    printf("warning: unknown socket family\n");
+                    printf("Warning: Unknown socket family\n");
 
             {
                 LOCK(cs_vNodes);
@@ -1390,7 +1391,7 @@ void ThreadOpenConnections2(void* parg)
     printf("ThreadOpenConnections started\n");
 
     // Connect to specific addresses
-    if (mapArgs.count("-connect"))
+    if (mapArgs.count("-connect") && mapMultiArgs["-connect"].size() > 0)
     {
         for (int64 nLoop = 0;; nLoop++)
         {
@@ -1406,6 +1407,7 @@ void ThreadOpenConnections2(void* parg)
                         return;
                 }
             }
+            Sleep(500);
         }
     }
 
@@ -1479,7 +1481,12 @@ void ThreadOpenConnections2(void* parg)
             if (!addr.IsValid() || setConnected.count(addr.GetGroup()) || IsLocal(addr))
                 break;
 
+            // If we didn't find an appropriate destination after trying 100 addresses fetched from addrman,
+            // stop this loop, and let the outer loop run again (which sleeps, adds seed nodes, recalculates
+            // already-connected network ranges, ...) before trying new addrman addresses.
             nTries++;
+            if (nTries > 100)
+                break;
 
             if (IsLimited(addr))
                 continue;
@@ -1595,7 +1602,7 @@ void ThreadOpenAddedConnections2(void* parg)
     }
 }
 
-// if succesful, this moves the passed grant to the constructed node
+// if successful, this moves the passed grant to the constructed node
 bool OpenNetworkConnection(const CAddress& addrConnect, CSemaphoreGrant *grantOutbound, const char *strDest, bool fOneShot)
 {
     //
@@ -1772,7 +1779,7 @@ bool BindListenPort(const CService &addrBind, string& strError)
 
 
 #ifdef WIN32
-    // Set to nonblocking, incoming connections will also inherit this
+    // Set to non-blocking, incoming connections will also inherit this
     if (ioctlsocket(hListenSocket, FIONBIO, (u_long*)&nOne) == SOCKET_ERROR)
 #else
     if (fcntl(hListenSocket, F_SETFL, O_NONBLOCK) == SOCKET_ERROR)
@@ -1833,7 +1840,7 @@ void static Discover()
         return;
 
 #ifdef WIN32
-    // Get local host ip
+    // Get local host IP
     char pszHostName[1000] = "";
     if (gethostname(pszHostName, sizeof(pszHostName)) != SOCKET_ERROR)
     {

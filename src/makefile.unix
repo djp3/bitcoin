@@ -3,8 +3,11 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 USE_UPNP:=0
+USE_IPV6:=1
 
-DEFS=-DUSE_IPV6 -DBOOST_SPIRIT_THREADSAFE
+LINK:=$(CXX)
+
+DEFS=-DBOOST_SPIRIT_THREADSAFE
 
 DEFS += $(addprefix -I,$(CURDIR) $(CURDIR)/obj $(BOOST_INCLUDE_PATH) $(BDB_INCLUDE_PATH) $(OPENSSL_INCLUDE_PATH))
 LIBS = $(addprefix -L,$(BOOST_LIB_PATH) $(BDB_LIB_PATH) $(OPENSSL_LIB_PATH))
@@ -39,6 +42,10 @@ endif
 ifneq (${USE_UPNP}, -)
 	LIBS += -l miniupnpc
 	DEFS += -DUSE_UPNP=$(USE_UPNP)
+endif
+
+ifneq (${USE_IPV6}, -)
+	DEFS += -DUSE_IPV6=$(USE_IPV6)
 endif
 
 LIBS+= \
@@ -110,6 +117,9 @@ OBJS= \
     obj/bitcoinrpc.o \
     obj/rpcdump.o \
     obj/rpcnet.o \
+    obj/rpcmining.o \
+    obj/rpcwallet.o \
+    obj/rpcblockchain.o \
     obj/rpcrawtransaction.o \
     obj/script.o \
     obj/sync.o \
@@ -138,7 +148,7 @@ obj/%.o: %.cpp
 	  rm -f $(@:%.o=%.d)
 
 bitcoind: $(OBJS:obj/%=obj/%)
-	$(CXX) $(xCXXFLAGS) -o $@ $^ $(xLDFLAGS) $(LIBS)
+	$(LINK) $(xCXXFLAGS) -o $@ $^ $(xLDFLAGS) $(LIBS)
 
 TESTOBJS := $(patsubst test/%.cpp,obj-test/%.o,$(wildcard test/*.cpp))
 
@@ -150,7 +160,7 @@ obj-test/%.o: test/%.cpp
 	  rm -f $(@:%.o=%.d)
 
 test_bitcoin: $(TESTOBJS) $(filter-out obj/init.o,$(OBJS:obj/%=obj/%))
-	$(CXX) $(xCXXFLAGS) -o $@ $(LIBPATHS) $^ -Wl,-B$(LMODE) -lboost_unit_test_framework $(xLDFLAGS) $(LIBS)
+	$(LINK) $(xCXXFLAGS) -o $@ $(LIBPATHS) $^ -Wl,-B$(LMODE) -lboost_unit_test_framework $(xLDFLAGS) $(LIBS)
 
 clean:
 	-rm -f bitcoind test_bitcoin

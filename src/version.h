@@ -10,10 +10,10 @@
 // client versioning
 //
 
-// These need to be macro's, as version.cpp's voodoo requires it
+// These need to be macros, as version.cpp's voodoo requires it
 #define CLIENT_VERSION_MAJOR       0
-#define CLIENT_VERSION_MINOR       6
-#define CLIENT_VERSION_REVISION   99
+#define CLIENT_VERSION_MINOR       7
+#define CLIENT_VERSION_REVISION    0
 #define CLIENT_VERSION_BUILD       0
 
 static const int CLIENT_VERSION =
@@ -30,7 +30,7 @@ extern const std::string CLIENT_DATE;
 // network protocol versioning
 //
 
-static const int PROTOCOL_VERSION = 60001;
+static const int PROTOCOL_VERSION = 60002;
 
 // earlier versions not supported as of Feb 2012, and are disconnected
 static const int MIN_PROTO_VERSION = 209;
@@ -45,5 +45,8 @@ static const int NOBLKS_VERSION_END = 32400;
 
 // BIP 0031, pong message, is enabled for all versions AFTER this one
 static const int BIP0031_VERSION = 60000;
+
+// "mempool" command, enhanced "getdata" behavior starts with this version:
+static const int MEMPOOL_GD_VERSION = 60002;
 
 #endif
