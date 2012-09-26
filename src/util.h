@@ -41,7 +41,6 @@ static const int64 CENT = 1000000;
 #define UBEGIN(a)           ((unsigned char*)&(a))
 #define UEND(a)             ((unsigned char*)&((&(a))[1]))
 #define ARRAYLEN(array)     (sizeof(array)/sizeof((array)[0]))
-#define printf              OutputDebugStringF
 
 #ifndef PRI64d
 #if defined(_MSC_VER) || defined(__MSVCRT__)
@@ -53,6 +52,17 @@ static const int64 CENT = 1000000;
 #define PRI64u  "llu"
 #define PRI64x  "llx"
 #endif
+#endif
+
+/* Format characters for (s)size_t and ptrdiff_t */
+#if defined(_MSC_VER) || defined(__MSVCRT__)
+  #define PRIszx    "%Ix"
+  #define PRIszu    "%Iu"
+  #define PRIszd    "%Id"
+#else
+  #define PRIszx    "%zx"
+  #define PRIszu    "%zu"
+  #define PRIszd    "%zd"
 #endif
 
 // This is needed because the foreach macro can't get over the comma in pair<t1, t2>
@@ -80,11 +90,7 @@ T* alignup(T* p)
 #define S_IRUSR             0400
 #define S_IWUSR             0200
 #endif
-#define unlink              _unlink
 #else
-#define _vsnprintf(a,b,c,d) vsnprintf(a,b,c,d)
-#define strlwr(psz)         to_lower(psz)
-#define _strlwr(psz)        to_lower(psz)
 #define MAX_PATH            1024
 inline void Sleep(int64 n)
 {
@@ -94,6 +100,15 @@ inline void Sleep(int64 n)
 }
 #endif
 
+/* This GNU C extension enables the compiler to check the format string against the parameters provided.
+ * X is the number of the "format string" parameter, and Y is the number of the first variadic parameter.
+ * Parameters count from 1.
+ */
+#ifdef __GNUC__
+#define ATTR_WARN_PRINTF(X,Y) __attribute__((format(printf,X,Y)))
+#else
+#define ATTR_WARN_PRINTF(X,Y)
+#endif
 
 
 
@@ -121,16 +136,31 @@ extern bool fReopenDebugLog;
 
 void RandAddSeed();
 void RandAddSeedPerfmon();
-int OutputDebugStringF(const char* pszFormat, ...);
-int my_snprintf(char* buffer, size_t limit, const char* format, ...);
+int ATTR_WARN_PRINTF(1,2) OutputDebugStringF(const char* pszFormat, ...);
 
-/* It is not allowed to use va_start with a pass-by-reference argument.
-   (C++ standard, 18.7, paragraph 3). Use a dummy argument to work around this, and use a
-   macro to keep similar semantics.
+/*
+  Rationale for the real_strprintf / strprintf construction:
+    It is not allowed to use va_start with a pass-by-reference argument.
+    (C++ standard, 18.7, paragraph 3). Use a dummy argument to work around this, and use a
+    macro to keep similar semantics.
 */
+
+/** Overload strprintf for char*, so that GCC format type warnings can be given */
+std::string ATTR_WARN_PRINTF(1,3) real_strprintf(const char *format, int dummy, ...);
+/** Overload strprintf for std::string, to be able to use it with _ (translation).
+ * This will not support GCC format type warnings (-Wformat) so be careful.
+ */
 std::string real_strprintf(const std::string &format, int dummy, ...);
 #define strprintf(format, ...) real_strprintf(format, 0, __VA_ARGS__)
-std::string vstrprintf(const std::string &format, va_list ap);
+std::string vstrprintf(const char *format, va_list ap);
+
+/* Redefine printf so that it directs output to debug.log
+ *
+ * Do this *after* defining the other printf-like functions, because otherwise the
+ * __attribute__((format(printf,X,Y))) gets expanded to __attribute__((format(OutputDebugStringF,X,Y)))
+ * which confuses gcc.
+ */
+#define printf OutputDebugStringF
 
 bool error(const char *format, ...);
 void LogException(std::exception* pex, const char* pszThread);
@@ -237,9 +267,9 @@ inline int64 abs64(int64 n)
 template<typename T>
 std::string HexStr(const T itbegin, const T itend, bool fSpaces=false)
 {
-    std::vector<char> rv;
-    static char hexmap[16] = { '0', '1', '2', '3', '4', '5', '6', '7',
-                               '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+    std::string rv;
+    static const char hexmap[16] = { '0', '1', '2', '3', '4', '5', '6', '7',
+                                     '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
     rv.reserve((itend-itbegin)*3);
     for(T it = itbegin; it < itend; ++it)
     {
@@ -250,7 +280,7 @@ std::string HexStr(const T itbegin, const T itend, bool fSpaces=false)
         rv.push_back(hexmap[val&15]);
     }
 
-    return std::string(rv.begin(), rv.end());
+    return rv;
 }
 
 inline std::string HexStr(const std::vector<unsigned char>& vch, bool fSpaces=false)
@@ -483,7 +513,7 @@ inline uint160 Hash160(const std::vector<unsigned char>& vch)
 }
 
 
-/** Median filter over a stream of values. 
+/** Median filter over a stream of values.
  * Returns the median of the last N numbers
  */
 template <typename T> class CMedianFilter
@@ -500,7 +530,7 @@ public:
         vValues.push_back(initial_value);
         vSorted = vValues;
     }
-    
+
     void input(T value)
     {
         if(vValues.size() == nSize)
@@ -539,65 +569,14 @@ public:
     }
 };
 
+bool NewThread(void(*pfn)(void*), void* parg);
 
-
-
-
-
-
-
-
-
-// Note: It turns out we might have been able to use boost::thread
-// by using TerminateThread(boost::thread.native_handle(), 0);
 #ifdef WIN32
-typedef HANDLE pthread_t;
-
-inline pthread_t CreateThread(void(*pfn)(void*), void* parg, bool fWantHandle=false)
-{
-    DWORD nUnused = 0;
-    HANDLE hthread =
-        CreateThread(
-            NULL,                        // default security
-            0,                           // inherit stack size from parent
-            (LPTHREAD_START_ROUTINE)pfn, // function pointer
-            parg,                        // argument
-            0,                           // creation option, start immediately
-            &nUnused);                   // thread identifier
-    if (hthread == NULL)
-    {
-        printf("Error: CreateThread() returned %d\n", GetLastError());
-        return (pthread_t)0;
-    }
-    if (!fWantHandle)
-    {
-        CloseHandle(hthread);
-        return (pthread_t)-1;
-    }
-    return hthread;
-}
-
 inline void SetThreadPriority(int nPriority)
 {
     SetThreadPriority(GetCurrentThread(), nPriority);
 }
 #else
-inline pthread_t CreateThread(void(*pfn)(void*), void* parg, bool fWantHandle=false)
-{
-    pthread_t hthread = 0;
-    int ret = pthread_create(&hthread, NULL, (void*(*)(void*))pfn, parg);
-    if (ret != 0)
-    {
-        printf("Error: pthread_create() returned %d\n", ret);
-        return (pthread_t)0;
-    }
-    if (!fWantHandle)
-    {
-        pthread_detach(hthread);
-        return (pthread_t)-1;
-    }
-    return hthread;
-}
 
 #define THREAD_PRIORITY_LOWEST          PRIO_MAX
 #define THREAD_PRIORITY_BELOW_NORMAL    2

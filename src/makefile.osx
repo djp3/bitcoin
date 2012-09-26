@@ -70,6 +70,7 @@ CFLAGS += -Wall -Wextra -Wformat -Wformat-security -Wno-unused-parameter \
     $(DEBUGFLAGS) $(DEFS) $(INCLUDEPATHS)
 
 OBJS= \
+    obj/alert.o \
     obj/version.o \
     obj/checkpoints.o \
     obj/netbase.o \
@@ -115,6 +116,9 @@ endif
 
 all: bitcoind
 
+test check: test_bitcoin FORCE
+	./test_bitcoin
+
 # auto-generated dependencies:
 -include obj/*.P
 -include obj-test/*.P
@@ -152,6 +156,6 @@ clean:
 	-rm -f obj-test/*.o
 	-rm -f obj/*.P
 	-rm -f obj-test/*.P
-	-rm -f src/build.h
+	-rm -f obj/build.h
 
 FORCE:
