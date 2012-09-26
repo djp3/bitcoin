@@ -11,6 +11,7 @@ src/build.h
 *.o
 *.patch
 .bitcoin
+djp3Dump_*.json
 
 #compilation and Qt preprocessor part
 *.qm
