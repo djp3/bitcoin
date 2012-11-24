@@ -1,6 +1,6 @@
 TEMPLATE = app
 TARGET = bitcoin-qt
-VERSION = 0.7.0
+VERSION = 0.7.99
 INCLUDEPATH += src src/json src/qt
 DEFINES += QT_GUI BOOST_THREAD_USE_LIB BOOST_SPIRIT_THREADSAFE
 CONFIG += no_include_pwd
@@ -33,11 +33,13 @@ contains(RELEASE, 1) {
 
 !win32 {
 # for extra security against potential buffer overflows: enable GCCs Stack Smashing Protection
-QMAKE_CXXFLAGS *= -fstack-protector-all --param ssp-buffer-size=1
-QMAKE_LFLAGS *= -fstack-protector-all --param ssp-buffer-size=1
+QMAKE_CXXFLAGS *= -fstack-protector-all
+QMAKE_LFLAGS *= -fstack-protector-all
 # We need to exclude this for Windows cross compile with MinGW 4.2.x, as it will result in a non-working executable!
 # This can be enabled for Windows, when we switch to MinGW >= 4.4.x.
 }
+# for extra security (see: https://wiki.debian.org/Hardening)
+QMAKE_CXXFLAGS *= -D_FORTIFY_SOURCE=2 -Wl,-z,relro -Wl,-z,now
 # for extra security on Windows: enable ASLR and DEP via GCC linker flags
 win32:QMAKE_LFLAGS *= -Wl,--dynamicbase -Wl,--nxcompat
 
@@ -90,6 +92,23 @@ contains(BITCOIN_NEED_QT_PLUGINS, 1) {
     QTPLUGIN += qcncodecs qjpcodecs qtwcodecs qkrcodecs qtaccessiblewidgets
 }
 
+INCLUDEPATH += src/leveldb/include src/leveldb/helpers
+LIBS += $$PWD/src/leveldb/libleveldb.a $$PWD/src/leveldb/libmemenv.a
+!windows {
+    genleveldb.commands = cd $$PWD/src/leveldb && $(MAKE) libleveldb.a libmemenv.a
+} else {
+    # make an educated guess about what the ranlib command is called
+    isEmpty(QMAKE_RANLIB) {
+        QMAKE_RANLIB = $$replace(QMAKE_STRIP, strip, ranlib)
+    }
+    genleveldb.commands = cd $$PWD/src/leveldb && CC=$$QMAKE_CC CXX=$$QMAKE_CXX TARGET_OS=OS_WINDOWS_CROSSCOMPILE CXXFLAGS="-I$$BOOST_INCLUDE_PATH" LDFLAGS="-L$$BOOST_LIB_PATH" $(MAKE) libleveldb.a libmemenv.a && $$QMAKE_RANLIB $$PWD/src/leveldb/libleveldb.a && $$QMAKE_RANLIB $$PWD/src/leveldb/libmemenv.a
+}
+genleveldb.target = $$PWD/src/leveldb/libleveldb.a
+genleveldb.depends = FORCE
+PRE_TARGETDEPS += $$PWD/src/leveldb/libleveldb.a
+QMAKE_EXTRA_TARGETS += genleveldb
+# Gross ugly hack that depends on qmake internals, unfortunately there's no other way to do it.
+QMAKE_CLEAN += $$PWD/src/leveldb/libleveldb.a; cd $$PWD/src/leveldb ; $(MAKE) clean
 
 # regenerate src/build.h
 !windows|contains(USE_BUILD_INFO, 1) {
@@ -125,7 +144,6 @@ HEADERS += src/qt/bitcoingui.h \
     src/util.h \
     src/uint256.h \
     src/serialize.h \
-    src/strlcpy.h \
     src/main.h \
     src/net.h \
     src/key.h \
@@ -175,7 +193,9 @@ HEADERS += src/qt/bitcoingui.h \
     src/qt/rpcconsole.h \
     src/version.h \
     src/netbase.h \
-    src/clientversion.h
+    src/clientversion.h \
+    src/txdb.h \
+    src/leveldb.h
 
 SOURCES += src/qt/bitcoin.cpp src/qt/bitcoingui.cpp \
     src/qt/transactiontablemodel.cpp \
@@ -235,7 +255,9 @@ SOURCES += src/qt/bitcoin.cpp src/qt/bitcoingui.cpp \
     src/qt/notificator.cpp \
     src/qt/qtipcserver.cpp \
     src/qt/rpcconsole.cpp \
-    src/noui.cpp
+    src/noui.cpp \
+    src/leveldb.cpp \
+    src/txdb.cpp
 
 RESOURCES += \
     src/qt/bitcoin.qrc
@@ -322,7 +344,6 @@ isEmpty(BOOST_INCLUDE_PATH) {
     macx:BOOST_INCLUDE_PATH = /opt/local/include
 }
 
-windows:LIBS += -lws2_32 -lshlwapi -lmswsock
 windows:DEFINES += WIN32
 windows:RC_FILE = src/qt/res/bitcoin-qt.rc
 
@@ -357,7 +378,7 @@ INCLUDEPATH += $$BOOST_INCLUDE_PATH $$BDB_INCLUDE_PATH $$OPENSSL_INCLUDE_PATH $$
 LIBS += $$join(BOOST_LIB_PATH,,-L,) $$join(BDB_LIB_PATH,,-L,) $$join(OPENSSL_LIB_PATH,,-L,) $$join(QRENCODE_LIB_PATH,,-L,)
 LIBS += -lssl -lcrypto -ldb_cxx$$BDB_LIB_SUFFIX
 # -lgdi32 has to happen after -lcrypto (see  #681)
-windows:LIBS += -lole32 -luuid -lgdi32
+windows:LIBS += -lws2_32 -lshlwapi -lmswsock -lole32 -loleaut32 -luuid -lgdi32
 LIBS += -lboost_system$$BOOST_LIB_SUFFIX -lboost_filesystem$$BOOST_LIB_SUFFIX -lboost_program_options$$BOOST_LIB_SUFFIX -lboost_thread$$BOOST_THREAD_LIB_SUFFIX
 windows:LIBS += -lboost_chrono$$BOOST_LIB_SUFFIX
 

@@ -17,14 +17,16 @@ djp3Dump_*.json
 Makefile
 bitcoin-qt
 
-#resources cpp
+# Resources cpp
 qrc_*.cpp
 
-#qt creator
+# Qt creator
 *.pro.user
 
-#mac specific
+# Mac specific
 .DS_Store
+
+!src/leveldb-*/Makefile
 
 #djp3 stuff
 deps/*
@@ -33,3 +35,4 @@ src/djp3Makeit.sh
 Bitcoin-Qt.app/*
 Bitcoin-Qt.dmg
 doc/doxygen
+

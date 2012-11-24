@@ -56,13 +56,22 @@ static const int64 CENT = 1000000;
 
 /* Format characters for (s)size_t and ptrdiff_t */
 #if defined(_MSC_VER) || defined(__MSVCRT__)
-  #define PRIszx    "%Ix"
-  #define PRIszu    "%Iu"
-  #define PRIszd    "%Id"
-#else
-  #define PRIszx    "%zx"
-  #define PRIszu    "%zu"
-  #define PRIszd    "%zd"
+  /* (s)size_t and ptrdiff_t have the same size specifier in MSVC:
+     http://msdn.microsoft.com/en-us/library/tcxf1dw6%28v=vs.100%29.aspx
+   */
+  #define PRIszx    "Ix"
+  #define PRIszu    "Iu"
+  #define PRIszd    "Id"
+  #define PRIpdx    "Ix"
+  #define PRIpdu    "Iu"
+  #define PRIpdd    "Id"
+#else /* C99 standard */
+  #define PRIszx    "zx"
+  #define PRIszu    "zu"
+  #define PRIszd    "zd"
+  #define PRIpdx    "tx"
+  #define PRIpdu    "tu"
+  #define PRIpdd    "td"
 #endif
 
 // This is needed because the foreach macro can't get over the comma in pair<t1, t2>
@@ -154,6 +163,8 @@ std::string real_strprintf(const std::string &format, int dummy, ...);
 #define strprintf(format, ...) real_strprintf(format, 0, __VA_ARGS__)
 std::string vstrprintf(const char *format, va_list ap);
 
+bool ATTR_WARN_PRINTF(1,2) error(const char *format, ...);
+
 /* Redefine printf so that it directs output to debug.log
  *
  * Do this *after* defining the other printf-like functions, because otherwise the
@@ -162,7 +173,6 @@ std::string vstrprintf(const char *format, va_list ap);
  */
 #define printf OutputDebugStringF
 
-bool error(const char *format, ...);
 void LogException(std::exception* pex, const char* pszThread);
 void PrintException(std::exception* pex, const char* pszThread);
 void PrintExceptionContinue(std::exception* pex, const char* pszThread);
@@ -186,6 +196,7 @@ bool WildcardMatch(const char* psz, const char* mask);
 bool WildcardMatch(const std::string& str, const std::string& mask);
 void FileCommit(FILE *fileout);
 int GetFilesize(FILE* file);
+void AllocateFileRange(FILE *file, unsigned int offset, unsigned int length);
 bool RenameOver(boost::filesystem::path src, boost::filesystem::path dest);
 boost::filesystem::path GetDefaultDataDir();
 const boost::filesystem::path &GetDataDir(bool fNetSpecific = true);
@@ -394,20 +405,6 @@ bool SoftSetBoolArg(const std::string& strArg, bool fValue);
 
 
 
-
-
-// Randomize the stack to help protect against buffer overrun exploits
-#define IMPLEMENT_RANDOMIZE_STACK(ThreadFn)     \
-    {                                           \
-        static char nLoops;                     \
-        if (nLoops <= 0)                        \
-            nLoops = GetRand(20) + 1;           \
-        if (nLoops-- > 1)                       \
-        {                                       \
-            ThreadFn;                           \
-            return;                             \
-        }                                       \
-    }
 
 
 template<typename T1>

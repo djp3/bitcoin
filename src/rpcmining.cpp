@@ -96,10 +96,10 @@ Value getwork(const Array& params, bool fHelp)
             "If [data] is specified, tries to solve the block and returns true if it was successful.");
 
     if (vNodes.empty())
-        throw JSONRPCError(-9, "Bitcoin is not connected!");
+        throw JSONRPCError(RPC_CLIENT_NOT_CONNECTED, "Bitcoin is not connected!");
 
     if (IsInitialBlockDownload())
-        throw JSONRPCError(-10, "Bitcoin is downloading blocks...");
+        throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, "Bitcoin is downloading blocks...");
 
     typedef map<uint256, pair<CBlock*, CScript> > mapNewBlock_t;
     static mapNewBlock_t mapNewBlock;    // FIXME: thread safety
@@ -136,7 +136,7 @@ Value getwork(const Array& params, bool fHelp)
             // Create new block
             pblock = CreateNewBlock(reservekey);
             if (!pblock)
-                throw JSONRPCError(-7, "Out of memory");
+                throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
             vNewBlock.push_back(pblock);
 
             // Need to update only after we know CreateNewBlock succeeded
@@ -174,7 +174,7 @@ Value getwork(const Array& params, bool fHelp)
         // Parse parameters
         vector<unsigned char> vchData = ParseHex(params[0].get_str());
         if (vchData.size() != 128)
-            throw JSONRPCError(-8, "Invalid parameter");
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter");
         CBlock* pdata = (CBlock*)&vchData[0];
 
         // Byte reverse
@@ -230,17 +230,17 @@ Value getblocktemplate(const Array& params, bool fHelp)
             /* Do nothing */
         }
         else
-            throw JSONRPCError(-8, "Invalid mode");
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid mode");
     }
 
     if (strMode != "template")
-        throw JSONRPCError(-8, "Invalid mode");
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid mode");
 
     if (vNodes.empty())
-        throw JSONRPCError(-9, "Bitcoin is not connected!");
+        throw JSONRPCError(RPC_CLIENT_NOT_CONNECTED, "Bitcoin is not connected!");
 
     if (IsInitialBlockDownload())
-        throw JSONRPCError(-10, "Bitcoin is downloading blocks...");
+        throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, "Bitcoin is downloading blocks...");
 
     static CReserveKey reservekey(pwalletMain);
 
@@ -268,7 +268,7 @@ Value getblocktemplate(const Array& params, bool fHelp)
         }
         pblock = CreateNewBlock(reservekey);
         if (!pblock)
-            throw JSONRPCError(-7, "Out of memory");
+            throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
 
         // Need to update only after we know CreateNewBlock succeeded
         pindexPrev = pindexPrevNew;
@@ -281,7 +281,7 @@ Value getblocktemplate(const Array& params, bool fHelp)
     Array transactions;
     map<uint256, int64_t> setTxIndex;
     int i = 0;
-    CTxDB txdb("r");
+    CCoinsViewCache &view = *pcoinsTip;
     BOOST_FOREACH (CTransaction& tx, pblock->vtx)
     {
         uint256 txHash = tx.GetHash();
@@ -298,25 +298,21 @@ Value getblocktemplate(const Array& params, bool fHelp)
 
         entry.push_back(Pair("hash", txHash.GetHex()));
 
-        MapPrevTx mapInputs;
-        map<uint256, CTxIndex> mapUnused;
-        bool fInvalid = false;
-        if (tx.FetchInputs(txdb, mapUnused, false, false, mapInputs, fInvalid))
+        Array deps;
+        BOOST_FOREACH (const CTxIn &in, tx.vin)
         {
-            entry.push_back(Pair("fee", (int64_t)(tx.GetValueIn(mapInputs) - tx.GetValueOut())));
-
-            Array deps;
-            BOOST_FOREACH (MapPrevTx::value_type& inp, mapInputs)
-            {
-                if (setTxIndex.count(inp.first))
-                    deps.push_back(setTxIndex[inp.first]);
-            }
-            entry.push_back(Pair("depends", deps));
-
-            int64_t nSigOps = tx.GetLegacySigOpCount();
-            nSigOps += tx.GetP2SHSigOpCount(mapInputs);
-            entry.push_back(Pair("sigops", nSigOps));
+            if (setTxIndex.count(in.prevout.hash))
+                deps.push_back(setTxIndex[in.prevout.hash]);
         }
+        entry.push_back(Pair("depends", deps));
+
+        int64_t nSigOps = tx.GetLegacySigOpCount();
+        if (tx.HaveInputs(view))
+        {
+            entry.push_back(Pair("fee", (int64_t)(tx.GetValueIn(view) - tx.GetValueOut())));
+            nSigOps += tx.GetP2SHSigOpCount(view);
+        }
+        entry.push_back(Pair("sigops", nSigOps));
 
         transactions.push_back(entry);
     }
@@ -364,18 +360,17 @@ Value submitblock(const Array& params, bool fHelp)
 
     vector<unsigned char> blockData(ParseHex(params[0].get_str()));
     CDataStream ssBlock(blockData, SER_NETWORK, PROTOCOL_VERSION);
-    CBlock block;
+    CBlock pblock;
     try {
-        ssBlock >> block;
+        ssBlock >> pblock;
     }
     catch (std::exception &e) {
-        throw JSONRPCError(-22, "Block decode failed");
+        throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Block decode failed");
     }
 
-    bool fAccepted = ProcessBlock(NULL, &block);
+    bool fAccepted = ProcessBlock(NULL, &pblock);
     if (!fAccepted)
         return "rejected";
 
     return Value::null;
 }
-

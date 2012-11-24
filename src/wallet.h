@@ -16,11 +16,11 @@
 #include "script.h"
 #include "ui_interface.h"
 #include "util.h"
+#include "walletdb.h"
 
 class CAccountingEntry;
 class CWalletTx;
 class CReserveKey;
-class CWalletDB;
 class COutput;
 
 /** (client) version numbers for particular wallet features */
@@ -149,7 +149,7 @@ public:
     /** Increment the next transaction order id
         @return next transaction order id
      */
-    int64 IncOrderPosNext();
+    int64 IncOrderPosNext(CWalletDB *pwalletdb = NULL);
 
     typedef std::pair<CWalletTx*, CAccountingEntry*> TxPair;
     typedef std::multimap<int64, TxPair > TxItems;
@@ -162,11 +162,10 @@ public:
 
     void MarkDirty();
     bool AddToWallet(const CWalletTx& wtxIn);
-    bool AddToWalletIfInvolvingMe(const CTransaction& tx, const CBlock* pblock, bool fUpdate = false, bool fFindBlock = false);
+    bool AddToWalletIfInvolvingMe(const uint256 &hash, const CTransaction& tx, const CBlock* pblock, bool fUpdate = false, bool fFindBlock = false);
     bool EraseFromWallet(uint256 hash);
     void WalletUpdateSpent(const CTransaction& prevout);
     int ScanForWalletTransactions(CBlockIndex* pindexStart, bool fUpdate = false);
-    int ScanForWalletTransaction(const uint256& hashTx);
     void ReacceptWalletTransactions();
     void ResendWalletTransactions();
     int64 GetBalance() const;
@@ -256,7 +255,7 @@ public:
     }
     void SetBestChain(const CBlockLocator& loc);
 
-    int LoadWallet(bool& fFirstRunRet);
+    DBErrors LoadWallet(bool& fFirstRunRet);
 
     bool SetAddressBookName(const CTxDestination& address, const std::string& strName);
 
@@ -376,10 +375,12 @@ public:
     // memory only
     mutable bool fDebitCached;
     mutable bool fCreditCached;
+    mutable bool fImmatureCreditCached;
     mutable bool fAvailableCreditCached;
     mutable bool fChangeCached;
     mutable int64 nDebitCached;
     mutable int64 nCreditCached;
+    mutable int64 nImmatureCreditCached;
     mutable int64 nAvailableCreditCached;
     mutable int64 nChangeCached;
 
@@ -417,10 +418,12 @@ public:
         vfSpent.clear();
         fDebitCached = false;
         fCreditCached = false;
+        fImmatureCreditCached = false;
         fAvailableCreditCached = false;
         fChangeCached = false;
         nDebitCached = 0;
         nCreditCached = 0;
+        nImmatureCreditCached = 0;
         nAvailableCreditCached = 0;
         nChangeCached = 0;
         nOrderPos = -1;
@@ -564,6 +567,20 @@ public:
         return nCreditCached;
     }
 
+    int64 GetImmatureCredit(bool fUseCache=true) const
+    {
+        if (IsCoinBase() && GetBlocksToMaturity() > 0 && IsInMainChain())
+        {
+            if (fUseCache && fImmatureCreditCached)
+                return nImmatureCreditCached;
+            nImmatureCreditCached = pwallet->GetCredit(*this);
+            fImmatureCreditCached = true;
+            return nImmatureCreditCached;
+        }
+
+        return 0;
+    }
+
     int64 GetAvailableCredit(bool fUseCache=true) const
     {
         // Must wait until coinbase is safely deep enough in the chain before valuing it
@@ -659,12 +676,8 @@ public:
     int64 GetTxTime() const;
     int GetRequestCount() const;
 
-    void AddSupportingTransactions(CTxDB& txdb);
-
-    bool AcceptWalletTransaction(CTxDB& txdb, bool fCheckInputs=true);
-    bool AcceptWalletTransaction();
-
-    void RelayWalletTransaction(CTxDB& txdb);
+    void AddSupportingTransactions();
+    bool AcceptWalletTransaction(bool fCheckInputs=true);
     void RelayWalletTransaction();
 };
 

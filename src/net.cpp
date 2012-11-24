@@ -7,7 +7,6 @@
 #include "db.h"
 #include "net.h"
 #include "init.h"
-#include "strlcpy.h"
 #include "addrman.h"
 #include "ui_interface.h"
 
@@ -639,8 +638,6 @@ void CNode::copyStats(CNodeStats &stats)
 
 void ThreadSocketHandler(void* parg)
 {
-    IMPLEMENT_RANDOMIZE_STACK(ThreadSocketHandler(parg));
-
     // Make this thread recognisable as the networking thread
     RenameThread("bitcoin-net");
 
@@ -713,13 +710,9 @@ void ThreadSocketHandler2(void* parg)
                             TRY_LOCK(pnode->cs_vRecv, lockRecv);
                             if (lockRecv)
                             {
-                                TRY_LOCK(pnode->cs_mapRequests, lockReq);
-                                if (lockReq)
-                                {
-                                    TRY_LOCK(pnode->cs_inventory, lockInv);
-                                    if (lockInv)
-                                        fDelete = true;
-                                }
+                                TRY_LOCK(pnode->cs_inventory, lockInv);
+                                if (lockInv)
+                                    fDelete = true;
                             }
                         }
                     }
@@ -887,7 +880,7 @@ void ThreadSocketHandler2(void* parg)
 
                     if (nPos > ReceiveBufferSize()) {
                         if (!pnode->fDisconnect)
-                            printf("socket recv flood control disconnect (%d bytes)\n", vRecv.size());
+                            printf("socket recv flood control disconnect (%"PRIszu" bytes)\n", vRecv.size());
                         pnode->CloseSocketDisconnect();
                     }
                     else {
@@ -1000,8 +993,6 @@ void ThreadSocketHandler2(void* parg)
 #ifdef USE_UPNP
 void ThreadMapPort(void* parg)
 {
-    IMPLEMENT_RANDOMIZE_STACK(ThreadMapPort(parg));
-
     // Make this thread recognisable as the UPnP thread
     RenameThread("bitcoin-UPnP");
 
@@ -1160,8 +1151,6 @@ static const char *strDNSSeed[][2] = {
 
 void ThreadDNSAddressSeed(void* parg)
 {
-    IMPLEMENT_RANDOMIZE_STACK(ThreadDNSAddressSeed(parg));
-
     // Make this thread recognisable as the DNS seeding thread
     RenameThread("bitcoin-dnsseed");
 
@@ -1191,7 +1180,7 @@ void ThreadDNSAddressSeed2(void* parg)
         printf("Loading addresses from DNS seeds (could take a while)\n");
 
         for (unsigned int seed_idx = 0; seed_idx < ARRAYLEN(strDNSSeed); seed_idx++) {
-            if (GetNameProxy()) {
+            if (HaveNameProxy()) {
                 AddOneShot(strDNSSeed[seed_idx][1]);
             } else {
                 vector<CNetAddr> vaddr;
@@ -1320,6 +1309,8 @@ void DumpAddresses()
 
 void ThreadDumpAddress2(void* parg)
 {
+    printf("ThreadDumpAddress started\n");
+
     vnThreadsRunning[THREAD_DUMPADDRESS]++;
     while (!fShutdown)
     {
@@ -1333,8 +1324,6 @@ void ThreadDumpAddress2(void* parg)
 
 void ThreadDumpAddress(void* parg)
 {
-    IMPLEMENT_RANDOMIZE_STACK(ThreadDumpAddress(parg));
-
     // Make this thread recognisable as the address dumping thread
     RenameThread("bitcoin-adrdump");
 
@@ -1350,8 +1339,6 @@ void ThreadDumpAddress(void* parg)
 
 void ThreadOpenConnections(void* parg)
 {
-    IMPLEMENT_RANDOMIZE_STACK(ThreadOpenConnections(parg));
-
     // Make this thread recognisable as the connection opening thread
     RenameThread("bitcoin-opencon");
 
@@ -1513,8 +1500,6 @@ void ThreadOpenConnections2(void* parg)
 
 void ThreadOpenAddedConnections(void* parg)
 {
-    IMPLEMENT_RANDOMIZE_STACK(ThreadOpenAddedConnections(parg));
-
     // Make this thread recognisable as the connection opening thread
     RenameThread("bitcoin-opencon");
 
@@ -1541,7 +1526,7 @@ void ThreadOpenAddedConnections2(void* parg)
     if (mapArgs.count("-addnode") == 0)
         return;
 
-    if (GetNameProxy()) {
+    if (HaveNameProxy()) {
         while(!fShutdown) {
             BOOST_FOREACH(string& strAddNode, mapMultiArgs["-addnode"]) {
                 CAddress addr;
@@ -1646,8 +1631,6 @@ bool OpenNetworkConnection(const CAddress& addrConnect, CSemaphoreGrant *grantOu
 
 void ThreadMessageHandler(void* parg)
 {
-    IMPLEMENT_RANDOMIZE_STACK(ThreadMessageHandler(parg));
-
     // Make this thread recognisable as the message handling thread
     RenameThread("bitcoin-msghand");
 

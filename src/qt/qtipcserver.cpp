@@ -26,7 +26,7 @@ using namespace boost;
 using namespace boost::interprocess;
 using namespace boost::posix_time;
 
-#ifdef MAC_OSX
+#if defined MAC_OSX || defined __FreeBSD__
 // URI handling not implemented on OSX yet
 
 void ipcScanRelay(int argc, char *argv[]) { }
@@ -74,8 +74,6 @@ void ipcScanRelay(int argc, char *argv[])
 
 static void ipcThread(void* pArg)
 {
-    IMPLEMENT_RANDOMIZE_STACK(ipcThread(pArg));
-	
     // Make this thread recognisable as the GUI-IPC thread
     RenameThread("bitcoin-gui-ipc");
 	
