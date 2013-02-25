@@ -19,20 +19,20 @@ void static BatchWriteHashBestChain(CLevelDBBatch &batch, const uint256 &hash) {
     batch.Write('B', hash);
 }
 
-CCoinsViewDB::CCoinsViewDB(size_t nCacheSize, bool fMemory, bool fWipe) : db(GetDataDir() / "coins", nCacheSize, fMemory, fWipe) {
+CCoinsViewDB::CCoinsViewDB(size_t nCacheSize, bool fMemory, bool fWipe) : db(GetDataDir() / "chainstate", nCacheSize, fMemory, fWipe) {
 }
 
-bool CCoinsViewDB::GetCoins(uint256 txid, CCoins &coins) { 
+bool CCoinsViewDB::GetCoins(const uint256 &txid, CCoins &coins) { 
     return db.Read(make_pair('c', txid), coins); 
 }
 
-bool CCoinsViewDB::SetCoins(uint256 txid, const CCoins &coins) {
+bool CCoinsViewDB::SetCoins(const uint256 &txid, const CCoins &coins) {
     CLevelDBBatch batch;
     BatchWriteCoins(batch, txid, coins);
     return db.WriteBatch(batch);
 }
 
-bool CCoinsViewDB::HaveCoins(uint256 txid) {
+bool CCoinsViewDB::HaveCoins(const uint256 &txid) {
     return db.Exists(make_pair('c', txid)); 
 }
 
@@ -64,7 +64,7 @@ bool CCoinsViewDB::BatchWrite(const std::map<uint256, CCoins> &mapCoins, CBlockI
     return db.WriteBatch(batch);
 }
 
-CBlockTreeDB::CBlockTreeDB(size_t nCacheSize, bool fMemory, bool fWipe) : CLevelDB(GetDataDir() / "blktree", nCacheSize, fMemory, fWipe) {
+CBlockTreeDB::CBlockTreeDB(size_t nCacheSize, bool fMemory, bool fWipe) : CLevelDB(GetDataDir() / "blocks" / "index", nCacheSize, fMemory, fWipe) {
 }
 
 bool CBlockTreeDB::WriteBlockIndex(const CDiskBlockIndex& blockindex)
@@ -142,6 +142,29 @@ bool CCoinsViewDB::GetStats(CCoinsStats &stats) {
     }
     delete pcursor;
     stats.nHeight = GetBestBlock()->nHeight;
+    return true;
+}
+
+bool CBlockTreeDB::ReadTxIndex(const uint256 &txid, CDiskTxPos &pos) {
+    return Read(make_pair('t', txid), pos);
+}
+
+bool CBlockTreeDB::WriteTxIndex(const std::vector<std::pair<uint256, CDiskTxPos> >&vect) {
+    CLevelDBBatch batch;
+    for (std::vector<std::pair<uint256,CDiskTxPos> >::const_iterator it=vect.begin(); it!=vect.end(); it++)
+        batch.Write(make_pair('t', it->first), it->second);
+    return WriteBatch(batch);
+}
+
+bool CBlockTreeDB::WriteFlag(const std::string &name, bool fValue) {
+    return Write(std::make_pair('F', name), fValue ? '1' : '0');
+}
+
+bool CBlockTreeDB::ReadFlag(const std::string &name, bool &fValue) {
+    char ch;
+    if (!Read(std::make_pair('F', name), ch))
+        return false;
+    fValue = ch == '1';
     return true;
 }
 

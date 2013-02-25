@@ -34,6 +34,7 @@ public:
     int getNumBlocks() const;
     int getNumBlocksAtStartup();
 
+    double getVerificationProgress() const;
     QDateTime getLastBlockDate() const;
 
     //! Return true if client connected to testnet
@@ -70,8 +71,8 @@ signals:
     void numBlocksChanged(int count, int countOfPeers);
     void alertsChanged(const QString &warnings);
 
-    //! Asynchronous error notification
-    void error(const QString &title, const QString &message, bool modal);
+    //! Asynchronous message notification
+    void message(const QString &title, const QString &message, unsigned int style);
 
 public slots:
     void updateTimer();
