@@ -3,7 +3,7 @@ Bitcoin integration/staging tree
 
 http://www.bitcoin.org
 
-Copyright (c) 2009-2012 Bitcoin Developers
+Copyright (c) 2009-2013 Bitcoin Developers
 
 What is Bitcoin?
 ----------------
@@ -60,7 +60,7 @@ submit new unit tests for old code.
 
 Unit tests for the core code are in `src/test/`. To compile and run them:
 
-    cd src; make -f makefile.linux test
+    cd src; make -f makefile.unix test
 
 Unit tests for the GUI code are in `src/qt/test/`. To compile and run them:
 

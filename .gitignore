@@ -17,6 +17,10 @@ djp3Dump_*.json
 Makefile
 bitcoin-qt
 
+# Unit-tests
+Makefile.test
+bitcoin-qt_test
+
 # Resources cpp
 qrc_*.cpp
 
