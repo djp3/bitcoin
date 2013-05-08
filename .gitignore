@@ -16,6 +16,7 @@ djp3Dump_*.json
 *.qm
 Makefile
 bitcoin-qt
+Bitcoin-Qt.app
 
 # Unit-tests
 Makefile.test

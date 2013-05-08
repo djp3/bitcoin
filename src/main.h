@@ -79,8 +79,8 @@ extern std::set<CBlockIndex*, CBlockIndexWorkComparator> setBlockIndexValid;
 extern uint256 hashGenesisBlock;
 extern CBlockIndex* pindexGenesisBlock;
 extern int nBestHeight;
-extern CBigNum bnBestChainWork;
-extern CBigNum bnBestInvalidWork;
+extern uint256 nBestChainWork;
+extern uint256 nBestInvalidWork;
 extern uint256 hashBestChain;
 extern CBlockIndex* pindexBest;
 extern unsigned int nTransactionsUpdated;
@@ -441,6 +441,8 @@ public:
         return !(a == b);
     }
 
+    bool IsDust() const;
+
     std::string ToString() const
     {
         if (scriptPubKey.size() < 6)
@@ -469,6 +471,8 @@ enum GetMinFee_mode
 class CTransaction
 {
 public:
+    static int64 nMinTxFee;
+    static int64 nMinRelayTxFee;
     static const int CURRENT_VERSION=1;
     int nVersion;
     std::vector<CTxIn> vin;
@@ -1621,7 +1625,7 @@ public:
     unsigned int nUndoPos;
 
     // (memory only) Total amount of work (expected number of hashes) in the chain up to and including this block
-    CBigNum bnChainWork;
+    uint256 nChainWork;
 
     // Number of transactions in this block.
     // Note: in a potential headers-first mode, this number cannot be relied upon
@@ -1650,7 +1654,7 @@ public:
         nFile = 0;
         nDataPos = 0;
         nUndoPos = 0;
-        bnChainWork = 0;
+        nChainWork = 0;
         nTx = 0;
         nChainTx = 0;
         nStatus = 0;
@@ -1671,7 +1675,7 @@ public:
         nFile = 0;
         nDataPos = 0;
         nUndoPos = 0;
-        bnChainWork = 0;
+        nChainWork = 0;
         nTx = 0;
         nChainTx = 0;
         nStatus = 0;
@@ -1795,8 +1799,8 @@ public:
 struct CBlockIndexWorkComparator
 {
     bool operator()(CBlockIndex *pa, CBlockIndex *pb) {
-        if (pa->bnChainWork > pb->bnChainWork) return false;
-        if (pa->bnChainWork < pb->bnChainWork) return true;
+        if (pa->nChainWork > pb->nChainWork) return false;
+        if (pa->nChainWork < pb->nChainWork) return true;
 
         if (pa->GetBlockHash() < pb->GetBlockHash()) return false;
         if (pa->GetBlockHash() > pb->GetBlockHash()) return true;
@@ -2098,11 +2102,14 @@ extern CTxMemPool mempool;
 struct CCoinsStats
 {
     int nHeight;
+    uint256 hashBlock;
     uint64 nTransactions;
     uint64 nTransactionOutputs;
     uint64 nSerializedSize;
+    uint256 hashSerialized;
+    int64 nTotalAmount;
 
-    CCoinsStats() : nHeight(0), nTransactions(0), nTransactionOutputs(0), nSerializedSize(0) {}
+    CCoinsStats() : nHeight(0), hashBlock(0), nTransactions(0), nTransactionOutputs(0), nSerializedSize(0), hashSerialized(0), nTotalAmount(0) {}
 };
 
 /** Abstract view on the open txout dataset. */
