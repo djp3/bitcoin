@@ -73,8 +73,6 @@ bool fDebug = false;
 bool fDebugNet = false;
 bool fPrintToConsole = false;
 bool fPrintToDebugger = false;
-volatile bool fRequestShutdown = false;
-bool fShutdown = false;
 bool fDaemon = false;
 bool fServer = false;
 bool fCommandLine = false;
@@ -1074,7 +1072,7 @@ const boost::filesystem::path &GetDataDir(bool fNetSpecific)
 
     fs::create_directory(path);
 
-    cachedPath[fNetSpecific]=true;
+    cachedPath[fNetSpecific] = true;
     return path;
 }
 
@@ -1338,14 +1336,14 @@ void seed_insecure_rand(bool fDeterministic)
         insecure_rand_Rz = insecure_rand_Rw = 11;
     } else {
         uint32_t tmp;
-        do{
-            RAND_bytes((unsigned char*)&tmp,4);
-        }while(tmp==0 || tmp==0x9068ffffU);
-        insecure_rand_Rz=tmp;
-        do{
-            RAND_bytes((unsigned char*)&tmp,4);
-        }while(tmp==0 || tmp==0x464fffffU);
-        insecure_rand_Rw=tmp;
+        do {
+            RAND_bytes((unsigned char*)&tmp, 4);
+        } while(tmp == 0 || tmp == 0x9068ffffU);
+        insecure_rand_Rz = tmp;
+        do {
+            RAND_bytes((unsigned char*)&tmp, 4);
+        } while(tmp == 0 || tmp == 0x464fffffU);
+        insecure_rand_Rw = tmp;
     }
 }
 
@@ -1431,9 +1429,12 @@ void RenameThread(const char* name)
     //       removed.
     pthread_set_name_np(pthread_self(), name);
 
-// This is XCode 10.6-and-later; bring back if we drop 10.5 support:
-// #elif defined(MAC_OSX)
-//    pthread_setname_np(name);
+#elif defined(MAC_OSX) && defined(__MAC_OS_X_VERSION_MAX_ALLOWED)
+
+// pthread_setname_np is XCode 10.6-and-later
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
+    pthread_setname_np(name);
+#endif
 
 #else
     // Prevent warnings for unused parameters...

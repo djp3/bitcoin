@@ -11,6 +11,7 @@
 #include "guiutil.h"
 #include "guiconstants.h"
 #include "init.h"
+#include "util.h"
 #include "ui_interface.h"
 #include "paymentserver.h"
 
@@ -82,14 +83,9 @@ static void InitMessage(const std::string &message)
     if(splashref)
     {
         splashref->showMessage(QString::fromStdString(message), Qt::AlignBottom|Qt::AlignHCenter, QColor(255,255,200));
-        QApplication::instance()->processEvents();
+        qApp->processEvents();
     }
     printf("init message: %s\n", message.c_str());
-}
-
-static void QueueShutdown()
-{
-    QMetaObject::invokeMethod(QCoreApplication::instance(), "quit", Qt::QueuedConnection);
 }
 
 /*
@@ -185,7 +181,6 @@ int main(int argc, char *argv[])
     uiInterface.ThreadSafeMessageBox.connect(ThreadSafeMessageBox);
     uiInterface.ThreadSafeAskFee.connect(ThreadSafeAskFee);
     uiInterface.InitMessage.connect(InitMessage);
-    uiInterface.QueueShutdown.connect(QueueShutdown);
     uiInterface.Translate.connect(Translate);
 
     // Show help message immediately after parsing command-line options (for "-lang") and setting locale,
@@ -215,9 +210,16 @@ int main(int argc, char *argv[])
         if (GUIUtil::GetStartOnSystemStartup())
             GUIUtil::SetStartOnSystemStartup(true);
 
+        boost::thread_group threadGroup;
+
         BitcoinGUI window;
         guiref = &window;
-        if(AppInit2())
+
+        QTimer* pollShutdownTimer = new QTimer(guiref);
+        QObject::connect(pollShutdownTimer, SIGNAL(timeout()), guiref, SLOT(detectShutdown()));
+        pollShutdownTimer->start(200);
+
+        if(AppInit2(threadGroup))
         {
             {
                 // Put this in a block, so that the Model objects are cleaned up before
@@ -232,7 +234,8 @@ int main(int argc, char *argv[])
                 WalletModel walletModel(pwalletMain, &optionsModel);
 
                 window.setClientModel(&clientModel);
-                window.setWalletModel(&walletModel);
+                window.addWallet("~Default", &walletModel);
+                window.setCurrentWallet("~Default");
 
                 // If -min option passed, start window minimized.
                 if(GetBoolArg("-min"))
@@ -253,11 +256,13 @@ int main(int argc, char *argv[])
 
                 window.hide();
                 window.setClientModel(0);
-                window.setWalletModel(0);
+                window.removeAllWallets();
                 guiref = 0;
             }
             // Shutdown the core and its threads, but don't exit Bitcoin-Qt here
-            Shutdown(NULL);
+            threadGroup.interrupt_all();
+            threadGroup.join_all();
+            Shutdown();
         }
         else
         {
