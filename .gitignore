@@ -12,7 +12,7 @@ src/test_bitcoin
 .bitcoin
 djp3Dump_*.json
 
-#compilation and Qt preprocessor part
+# Compilation and Qt preprocessor part
 *.qm
 Makefile
 bitcoin-qt
@@ -30,6 +30,7 @@ qrc_*.cpp
 
 # Mac specific
 .DS_Store
+build
 
 !src/leveldb-*/Makefile
 
