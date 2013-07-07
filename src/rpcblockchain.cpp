@@ -117,7 +117,7 @@ Value getblockbycount(const Array& params, bool fHelp)
             "Dumps the block existing at specified height");
 
     CBlock block;
-    block.ReadFromDisk(pindex);
+    ReadBlockFromDisk(block,pindex);
     block.BuildMerkleTree();
 
     Object obj;
