@@ -4,10 +4,11 @@
 #include "bitcoinunits.h"
 #include "guiconstants.h"
 
+#include <QApplication>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QDoubleSpinBox>
-#include <QApplication>
+
 #include <qmath.h> // for qPow()
 
 BitcoinAmountField::BitcoinAmountField(QWidget *parent):
@@ -127,6 +128,11 @@ qint64 BitcoinAmountField::value(bool *valid_out) const
 void BitcoinAmountField::setValue(qint64 value)
 {
     setText(BitcoinUnits::format(currentUnit, value));
+}
+
+void BitcoinAmountField::setReadOnly(bool fReadeOnly)
+{
+    // TODO ...
 }
 
 void BitcoinAmountField::unitChanged(int idx)
