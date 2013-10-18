@@ -4,7 +4,7 @@ AM_CPPFLAGS =  $(INCLUDES) -I$(top_builddir)/src/obj \
   -I$(top_srcdir)/src/leveldb/include -I$(top_srcdir)/src \
   -I$(top_srcdir)/src/leveldb/helpers -I$(top_builddir)/src/qt \
   -I$(top_builddir)/src/qt/forms $(BOOST_INCLUDES) $(PROTOBUF_CFLAGS) \
-  $(QR_CFLAGS)
+  $(QR_CFLAGS) $(BDB_CPPFLAGS)
 AM_LDFLAGS = $(PTHREAD_CFLAGS)
 bin_PROGRAMS = bitcoin-qt
 noinst_LIBRARIES = libbitcoinqt.a
@@ -48,7 +48,7 @@ QT_MOC_CPP = moc_aboutdialog.cpp moc_addressbookpage.cpp \
   moc_optionsmodel.cpp moc_overviewpage.cpp moc_paymentserver.cpp \
   moc_qrcodedialog.cpp moc_qvalidatedlineedit.cpp moc_qvaluecombobox.cpp \
   moc_rpcconsole.cpp moc_sendcoinsdialog.cpp moc_sendcoinsentry.cpp \
-  moc_signverifymessagedialog.cpp moc_splashscreen.cpp moc_transactiondesc.cpp \
+  moc_signverifymessagedialog.cpp moc_splashscreen.cpp moc_trafficgraphwidget.cpp moc_transactiondesc.cpp \
   moc_transactiondescdialog.cpp moc_transactionfilterproxy.cpp \
   moc_transactiontablemodel.cpp moc_transactionview.cpp moc_walletframe.cpp \
   moc_walletmodel.cpp moc_walletstack.cpp moc_walletview.cpp
@@ -73,7 +73,7 @@ BITCOIN_QT_H  = aboutdialog.h addressbookpage.h addresstablemodel.h \
   optionsmodel.h overviewpage.h paymentrequestplus.h paymentserver.h \
   qrcodedialog.h qvalidatedlineedit.h qvaluecombobox.h rpcconsole.h \
   sendcoinsdialog.h sendcoinsentry.h signverifymessagedialog.h splashscreen.h \
-  transactiondescdialog.h transactiondesc.h transactionfilterproxy.h \
+  trafficgraphwidget.h transactiondescdialog.h transactiondesc.h transactionfilterproxy.h \
   transactionrecord.h transactiontablemodel.h transactionview.h walletframe.h \
   walletmodel.h walletmodeltransaction.h walletstack.h walletview.h
 
@@ -102,7 +102,7 @@ BITCOIN_QT_CPP = aboutdialog.cpp addressbookpage.cpp \
   optionsdialog.cpp optionsmodel.cpp overviewpage.cpp paymentrequestplus.cpp \
   paymentserver.cpp qvalidatedlineedit.cpp qvaluecombobox.cpp \
   rpcconsole.cpp sendcoinsdialog.cpp sendcoinsentry.cpp \
-  signverifymessagedialog.cpp splashscreen.cpp transactiondesc.cpp \
+  signverifymessagedialog.cpp splashscreen.cpp trafficgraphwidget.cpp transactiondesc.cpp \
   transactiondescdialog.cpp transactionfilterproxy.cpp transactionrecord.cpp \
   transactiontablemodel.cpp transactionview.cpp walletframe.cpp \
   walletmodel.cpp walletmodeltransaction.cpp walletstack.cpp walletview.cpp
@@ -145,7 +145,7 @@ bitcoin_qt_CPPFLAGS = $(AM_CPPFLAGS) $(QT_INCLUDES) \
   -I$(top_srcdir)/src/qt/forms
 bitcoin_qt_SOURCES = bitcoin.cpp
 bitcoin_qt_LDADD = libbitcoinqt.a $(LIBBITCOIN) $(LIBLEVELDB) $(LIBMEMENV) \
-  $(BOOST_LIBS) $(QT_LIBS) $(QT_DBUS_LIBS) $(QR_LIBS) $(PROTOBUF_LIBS)
+  $(BOOST_LIBS) $(QT_LIBS) $(QT_DBUS_LIBS) $(QR_LIBS) $(PROTOBUF_LIBS) $(BDB_LIBS)
 
 # forms/foo.h -> forms/ui_foo.h
 QT_FORMS_H=$(join $(dir $(QT_FORMS_UI)),$(addprefix ui_, $(notdir $(QT_FORMS_UI:.ui=.h))))
