@@ -17,7 +17,7 @@
 #endif
 
 #include <QSortFilterProxyModel>
-#include <QClipboard>
+//#include <qclipboard.h>
 #include <QMessageBox>
 #include <QMenu>
 

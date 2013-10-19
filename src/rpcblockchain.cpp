@@ -101,12 +101,14 @@ Value getblockbycount(const Array& params, bool fHelp)
             "Dumps the block existing at specified height");
 
     int64 height = params[0].get_int64();
+
+	int64 nBestHeight = chainActive.Height();
     if (height > nBestHeight)
         throw runtime_error(
             "getblockbycount height\n"
             "Dumps the block existing at specified height");
 
-    string blkname = strprintf("blk%d", height);
+    string blkname = strprintf("blk%lld", height);
 
     CBlockIndex* pindex;
     bool found = false;
@@ -115,7 +117,7 @@ Value getblockbycount(const Array& params, bool fHelp)
          mi != mapBlockIndex.end(); ++mi)
     {
     	pindex = (*mi).second;
-	if ((pindex->nHeight == height) && (pindex->IsInMainChain())) {
+	if (pindex->nHeight == height) {
 		found = true;
 		break;
 	}
