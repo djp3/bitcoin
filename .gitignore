@@ -83,3 +83,15 @@ qa/pull-tester/run-bitcoind-for-test.sh
 qa/pull-tester/build-tests.sh
 
 !src/leveldb*/Makefile
+
+#djp3 stuff
+doc/doxygen
+libtool
+configure.lineno
+.lineno
+src/bitcoin-config.h
+src/bitcoin-config.h.in
+src/m4
+src/stamp-h1
+
+
