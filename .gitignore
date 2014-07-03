@@ -48,8 +48,6 @@ src/qt/test/moc*.cpp
 *.json.h
 *.raw.h
 
-djp3Dump_*.json
-
 # Compilation and Qt preprocessor part
 *.qm
 Makefile

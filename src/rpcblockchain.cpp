@@ -111,6 +111,9 @@ Value getbestblockhash(const Array& params, bool fHelp)
     return chainActive.Tip()->GetBlockHash().GetHex();
 }
 
+/* Left over from djp3 trying to extract raw blocks.  I couldn't maintain it
+ * with the other changes in the code base*/
+/*
 Value getblockbycount(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() != 1)
@@ -225,6 +228,7 @@ Value getblockbycount(const Array& params, bool fHelp)
 
     return obj;
 }
+*/
 
 
 
