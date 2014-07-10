@@ -619,7 +619,9 @@ bool AppInit2(boost::thread_group& threadGroup)
     if (mapArgs.count("-minrelaytxfee"))
     {
         int64_t n = 0;
-        if (ParseMoney(mapArgs["-minrelaytxfee"], n) && n > 0)
+		//djp3 edit for zero tx fees
+        //if (ParseMoney(mapArgs["-minrelaytxfee"], n) && n > 0)
+        if (ParseMoney(mapArgs["-minrelaytxfee"], n))
             ::minRelayTxFee = CFeeRate(n);
         else
             return InitError(strprintf(_("Invalid amount for -minrelaytxfee=<amount>: '%s'"), mapArgs["-minrelaytxfee"]));
@@ -629,7 +631,9 @@ bool AppInit2(boost::thread_group& threadGroup)
     if (mapArgs.count("-mintxfee"))
     {
         int64_t n = 0;
-        if (ParseMoney(mapArgs["-mintxfee"], n) && n > 0)
+		//djp3 edit for zero tx fees
+        //if (ParseMoney(mapArgs["-mintxfee"], n) && n > 0)
+        if (ParseMoney(mapArgs["-mintxfee"], n))
             CWallet::minTxFee = CFeeRate(n);
         else
             return InitError(strprintf(_("Invalid amount for -mintxfee=<amount>: '%s'"), mapArgs["-mintxfee"]));
@@ -644,8 +648,9 @@ bool AppInit2(boost::thread_group& threadGroup)
         payTxFee = CFeeRate(nFeePerK, 1000);
         if (payTxFee < ::minRelayTxFee)
         {
-            return InitError(strprintf(_("Invalid amount for -paytxfee=<amount>: '%s' (must be at least %s)"),
-                                       mapArgs["-paytxfee"], ::minRelayTxFee.ToString()));
+			//djp3 edit for eliminating minimum check
+            //return InitError(strprintf(_("Invalid amount for -paytxfee=<amount>: '%s' (must be at least %s)"),
+             //                          mapArgs["-paytxfee"], ::minRelayTxFee.ToString()));
         }
     }
     nTxConfirmTarget = GetArg("-txconfirmtarget", 1);
