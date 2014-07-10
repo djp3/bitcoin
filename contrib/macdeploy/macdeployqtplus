@@ -211,6 +211,7 @@ def getFrameworks(binaryPath, verbose):
     
     libraries = []
     for line in otoolLines:
+        line = line.replace("@loader_path", os.path.dirname(binaryPath))
         info = FrameworkInfo.fromOtoolLibraryLine(line.strip())
         if info is not None:
             if verbose >= 3:
@@ -309,7 +310,8 @@ def deployFrameworks(frameworks, bundlePath, binaryPath, strip, verbose, deploym
         
 #editted by djp3 based on https://github.com/bitcoin/bitcoin/pull/4190/files
         #if framework.installName.startswith("@executable_path"):
-        if framework.installName.startswith("@executable_path") or framework.installName.startswith("@loader_path"):
+        #if framework.installName.startswith("@executable_path") or framework.installName.startswith("@loader_path"):
+        if framework.installName.startswith("@executable_path") or framework.installName.startswith(bundlePath):
             if verbose >= 2:
                 print framework.frameworkName, "already deployed, skipping."
             continue
