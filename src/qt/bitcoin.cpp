@@ -53,7 +53,13 @@ Q_IMPORT_PLUGIN(qkrcodecs)
 Q_IMPORT_PLUGIN(qtaccessiblewidgets)
 #else
 Q_IMPORT_PLUGIN(AccessibleFactory)
+#if defined(QT_QPA_PLATFORM_XCB)
+Q_IMPORT_PLUGIN(QXcbIntegrationPlugin);
+#elif defined(QT_QPA_PLATFORM_WINDOWS)
 Q_IMPORT_PLUGIN(QWindowsIntegrationPlugin);
+#elif defined(QT_QPA_PLATFORM_COCOA)
+Q_IMPORT_PLUGIN(QCocoaIntegrationPlugin);
+#endif
 #endif
 #endif
 
@@ -400,8 +406,6 @@ void BitcoinApplication::initializeResult(int retval)
         paymentServer->setOptionsModel(optionsModel);
 #endif
 
-        emit splashFinished(window);
-
         clientModel = new ClientModel(optionsModel);
         window->setClientModel(clientModel);
 
@@ -417,6 +421,8 @@ void BitcoinApplication::initializeResult(int retval)
                              paymentServer, SLOT(fetchPaymentACK(CWallet*,const SendCoinsRecipient&,QByteArray)));
         }
 #endif
+
+        emit splashFinished(window);
 
         // If -min option passed, start window minimized.
         if(GetBoolArg("-min", false))
