@@ -8,20 +8,11 @@
 
 #include "key.h"
 #include "sync.h"
-#include "script.h"     // for CNoDestination
 
 #include <boost/signals2/signal.hpp>
 #include <boost/variant.hpp>
 
 class CScript;
-
-/** A txout script template with a specific destination. It is either:
- *  * CNoDestination: no destination set
- *  * CKeyID: TX_PUBKEYHASH destination
- *  * CScriptID: TX_SCRIPTHASH destination
- *  A CTxDestination is the internal data type encoded in a CBitcoinAddress
- */
-typedef boost::variant<CNoDestination, CKeyID, CScriptID> CTxDestination;
 
 /** A virtual base class for key stores */
 class CKeyStore
@@ -50,6 +41,7 @@ public:
     // Support for Watch-only addresses
     virtual bool AddWatchOnly(const CScript &dest) =0;
     virtual bool HaveWatchOnly(const CScript &dest) const =0;
+    virtual bool HaveWatchOnly() const =0;
 };
 
 typedef std::map<CKeyID, CKey> KeyMap;
@@ -107,9 +99,10 @@ public:
 
     virtual bool AddWatchOnly(const CScript &dest);
     virtual bool HaveWatchOnly(const CScript &dest) const;
+    virtual bool HaveWatchOnly() const;
 };
 
 typedef std::vector<unsigned char, secure_allocator<unsigned char> > CKeyingMaterial;
 typedef std::map<CKeyID, std::pair<CPubKey, std::vector<unsigned char> > > CryptedKeyMap;
 
-#endif
+#endif // BITCOIN_KEYSTORE_H

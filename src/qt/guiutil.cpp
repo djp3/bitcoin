@@ -124,6 +124,10 @@ bool parseBitcoinURI(const QUrl &uri, SendCoinsRecipient *out)
 
     SendCoinsRecipient rv;
     rv.address = uri.path();
+    // Trim any following forward slash which may have been added by the OS
+    if (rv.address.endsWith("/")) {
+        rv.address.truncate(rv.address.length() - 1);
+    }
     rv.amount = 0;
 
 #if QT_VERSION < 0x050000
@@ -377,12 +381,6 @@ void openDebugLogfile()
         QDesktopServices::openUrl(QUrl::fromLocalFile(boostPathToQString(pathDebug)));
 }
 
-ToolTipToRichTextFilter::ToolTipToRichTextFilter(int size_threshold, QObject *parent) :
-    QObject(parent), size_threshold(size_threshold)
-{
-
-}
-
 void SubstituteFonts()
 {
 #if defined(Q_OS_MAC)
@@ -401,6 +399,13 @@ void SubstituteFonts()
         QFont::insertSubstitution(".Lucida Grande UI", "Lucida Grande");
 #endif
 #endif
+}
+
+ToolTipToRichTextFilter::ToolTipToRichTextFilter(int size_threshold, QObject *parent) :
+    QObject(parent),
+    size_threshold(size_threshold)
+{
+
 }
 
 bool ToolTipToRichTextFilter::eventFilter(QObject *obj, QEvent *evt)
@@ -805,7 +810,7 @@ QString formatDurationStr(int secs)
     return strList.join(" ");
 }
 
-QString formatServicesStr(uint64_t mask)
+QString formatServicesStr(quint64 mask)
 {
     QStringList strList;
 

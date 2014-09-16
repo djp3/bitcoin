@@ -9,6 +9,7 @@
 #include "hash.h"
 #include "protocol.h"
 #include "util.h"
+#include "utilstrencodings.h"
 
 #include <stdint.h>
 
@@ -17,7 +18,9 @@
 #endif
 
 #include <boost/filesystem.hpp>
+#include <boost/thread.hpp>
 #include <boost/version.hpp>
+
 #include <openssl/rand.h>
 
 using namespace std;
@@ -225,11 +228,11 @@ CDB::CDB(const char *pszFile, const char* pszMode) :
     pdb(NULL), activeTxn(NULL)
 {
     int ret;
+    fReadOnly = (!strchr(pszMode, '+') && !strchr(pszMode, 'w'));
     if (pszFile == NULL)
         return;
 
-    fReadOnly = (!strchr(pszMode, '+') && !strchr(pszMode, 'w'));
-    bool fCreate = strchr(pszMode, 'c');
+    bool fCreate = strchr(pszMode, 'c') != NULL;
     unsigned int nFlags = DB_THREAD;
     if (fCreate)
         nFlags |= DB_CREATE;
