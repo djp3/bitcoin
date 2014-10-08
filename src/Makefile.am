@@ -65,8 +65,10 @@ BITCOIN_CORE_H = \
   addrman.h \
   alert.h \
   allocators.h \
+  amount.h \
   base58.h \
   bloom.h \
+  chain.h \
   chainparams.h \
   chainparamsbase.h \
   chainparamsseeds.h \
@@ -101,6 +103,7 @@ BITCOIN_CORE_H = \
   script/compressor.h \
   script/interpreter.h \
   script/script.h \
+  script/sigcache.h \
   script/sign.h \
   script/standard.h \
   serialize.h \
@@ -145,6 +148,7 @@ libbitcoin_server_a_SOURCES = \
   addrman.cpp \
   alert.cpp \
   bloom.cpp \
+  chain.cpp \
   checkpoints.cpp \
   init.cpp \
   leveldbwrapper.cpp \
@@ -215,6 +219,7 @@ libbitcoin_common_a_SOURCES = \
   script/compressor.cpp \
   script/interpreter.cpp \
   script/script.cpp \
+  script/sigcache.cpp \
   script/sign.cpp \
   script/standard.cpp \
   $(BITCOIN_CORE_H)
