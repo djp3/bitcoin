@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
  <class>RPCConsole</class>
- <widget class="QDialog" name="RPCConsole">
+ <widget class="QWidget" name="RPCConsole">
   <property name="geometry">
    <rect>
     <x>0</x>
@@ -689,7 +689,7 @@
        <item row="0" column="0" rowspan="2">
         <widget class="QTableView" name="peerWidget">
          <property name="horizontalScrollBarPolicy">
-          <enum>Qt::ScrollBarAlwaysOff</enum>
+          <enum>Qt::ScrollBarAsNeeded</enum>
          </property>
          <property name="sortingEnabled">
           <bool>true</bool>

@@ -4,12 +4,11 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include "chainparamsbase.h"
-#include "init.h"
+#include "clientversion.h"
 #include "rpcclient.h"
 #include "rpcprotocol.h"
 #include "util.h"
 #include "utilstrencodings.h"
-#include "version.h"
 
 #include <boost/filesystem/operations.hpp>
 
@@ -46,27 +45,27 @@ std::string HelpMessageCli()
 //
 // Start
 //
+
+//
+// Exception thrown on connection error.  This error is used to determine
+// when to wait if -rpcwait is given.
+//
+class CConnectionFailed : public std::runtime_error
+{
+public:
+
+    explicit inline CConnectionFailed(const std::string& msg) :
+        std::runtime_error(msg)
+    {}
+
+};
+
 static bool AppInitRPC(int argc, char* argv[])
 {
     //
     // Parameters
     //
     ParseParameters(argc, argv);
-    if (!boost::filesystem::is_directory(GetDataDir(false))) {
-        fprintf(stderr, "Error: Specified data directory \"%s\" does not exist.\n", mapArgs["-datadir"].c_str());
-        return false;
-    }
-    try {
-        ReadConfigFile(mapArgs, mapMultiArgs);
-    } catch(std::exception &e) {
-        fprintf(stderr,"Error reading configuration file: %s\n", e.what());
-        return false;
-    }
-    // Check for -testnet or -regtest parameter (BaseParams() calls are only valid after this clause)
-    if (!SelectBaseParamsFromCommandLine()) {
-        fprintf(stderr, "Error: Invalid combination of -regtest and -testnet.\n");
-        return false;
-    }
     if (argc<2 || mapArgs.count("-?") || mapArgs.count("-help") || mapArgs.count("-version")) {
         std::string strUsage = _("Bitcoin Core RPC client version") + " " + FormatFullVersion() + "\n";
         if (!mapArgs.count("-version")) {
@@ -79,6 +78,21 @@ static bool AppInitRPC(int argc, char* argv[])
         }
 
         fprintf(stdout, "%s", strUsage.c_str());
+        return false;
+    }
+    if (!boost::filesystem::is_directory(GetDataDir(false))) {
+        fprintf(stderr, "Error: Specified data directory \"%s\" does not exist.\n", mapArgs["-datadir"].c_str());
+        return false;
+    }
+    try {
+        ReadConfigFile(mapArgs, mapMultiArgs);
+    } catch (const std::exception& e) {
+        fprintf(stderr,"Error reading configuration file: %s\n", e.what());
+        return false;
+    }
+    // Check for -testnet or -regtest parameter (BaseParams() calls are only valid after this clause)
+    if (!SelectBaseParamsFromCommandLine()) {
+        fprintf(stderr, "Error: Invalid combination of -regtest and -testnet.\n");
         return false;
     }
     return true;
@@ -96,20 +110,14 @@ Object CallRPC(const string& strMethod, const Array& params)
     bool fUseSSL = GetBoolArg("-rpcssl", false);
     asio::io_service io_service;
     ssl::context context(io_service, ssl::context::sslv23);
-    context.set_options(ssl::context::no_sslv2);
+    context.set_options(ssl::context::no_sslv2 | ssl::context::no_sslv3);
     asio::ssl::stream<asio::ip::tcp::socket> sslStream(io_service, context);
     SSLIOStreamDevice<asio::ip::tcp> d(sslStream, fUseSSL);
     iostreams::stream< SSLIOStreamDevice<asio::ip::tcp> > stream(d);
 
-    bool fWait = GetBoolArg("-rpcwait", false); // -rpcwait means try until server has started
-    do {
-        bool fConnected = d.connect(GetArg("-rpcconnect", "127.0.0.1"), GetArg("-rpcport", itostr(BaseParams().RPCPort())));
-        if (fConnected) break;
-        if (fWait)
-            MilliSleep(1000);
-        else
-            throw runtime_error("couldn't connect to server");
-    } while (fWait);
+    const bool fConnected = d.connect(GetArg("-rpcconnect", "127.0.0.1"), GetArg("-rpcport", itostr(BaseParams().RPCPort())));
+    if (!fConnected)
+        throw CConnectionFailed("couldn't connect to server");
 
     // HTTP basic authentication
     string strUserPass64 = EncodeBase64(mapArgs["-rpcuser"] + ":" + mapArgs["-rpcpassword"]);
@@ -168,32 +176,48 @@ int CommandLineRPC(int argc, char *argv[])
         std::vector<std::string> strParams(&argv[2], &argv[argc]);
         Array params = RPCConvertValues(strMethod, strParams);
 
-        // Execute
-        Object reply = CallRPC(strMethod, params);
+        // Execute and handle connection failures with -rpcwait
+        const bool fWait = GetBoolArg("-rpcwait", false);
+        do {
+            try {
+                const Object reply = CallRPC(strMethod, params);
 
-        // Parse reply
-        const Value& result = find_value(reply, "result");
-        const Value& error  = find_value(reply, "error");
+                // Parse reply
+                const Value& result = find_value(reply, "result");
+                const Value& error  = find_value(reply, "error");
 
-        if (error.type() != null_type) {
-            // Error
-            strPrint = "error: " + write_string(error, false);
-            int code = find_value(error.get_obj(), "code").get_int();
-            nRet = abs(code);
-        } else {
-            // Result
-            if (result.type() == null_type)
-                strPrint = "";
-            else if (result.type() == str_type)
-                strPrint = result.get_str();
-            else
-                strPrint = write_string(result, true);
-        }
+                if (error.type() != null_type) {
+                    // Error
+                    const int code = find_value(error.get_obj(), "code").get_int();
+                    if (fWait && code == RPC_IN_WARMUP)
+                        throw CConnectionFailed("server in warmup");
+                    strPrint = "error: " + write_string(error, false);
+                    nRet = abs(code);
+                } else {
+                    // Result
+                    if (result.type() == null_type)
+                        strPrint = "";
+                    else if (result.type() == str_type)
+                        strPrint = result.get_str();
+                    else
+                        strPrint = write_string(result, true);
+                }
+
+                // Connection succeeded, no need to retry.
+                break;
+            }
+            catch (const CConnectionFailed&) {
+                if (fWait)
+                    MilliSleep(1000);
+                else
+                    throw;
+            }
+        } while (fWait);
     }
-    catch (boost::thread_interrupted) {
+    catch (const boost::thread_interrupted&) {
         throw;
     }
-    catch (std::exception& e) {
+    catch (const std::exception& e) {
         strPrint = string("error: ") + e.what();
         nRet = EXIT_FAILURE;
     }
@@ -216,7 +240,7 @@ int main(int argc, char* argv[])
         if(!AppInitRPC(argc, argv))
             return EXIT_FAILURE;
     }
-    catch (std::exception& e) {
+    catch (const std::exception& e) {
         PrintExceptionContinue(&e, "AppInitRPC()");
         return EXIT_FAILURE;
     } catch (...) {
@@ -228,7 +252,7 @@ int main(int argc, char* argv[])
     try {
         ret = CommandLineRPC(argc, argv);
     }
-    catch (std::exception& e) {
+    catch (const std::exception& e) {
         PrintExceptionContinue(&e, "CommandLineRPC()");
     } catch (...) {
         PrintExceptionContinue(NULL, "CommandLineRPC()");

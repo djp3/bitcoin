@@ -3,8 +3,12 @@
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#ifndef _BITCOIN_COMPAT_H
-#define _BITCOIN_COMPAT_H
+#ifndef BITCOIN_COMPAT_H
+#define BITCOIN_COMPAT_H
+
+#if defined(HAVE_CONFIG_H)
+#include "config/bitcoin-config.h"
+#endif
 
 #ifdef WIN32
 #ifdef _WIN32_WINNT
@@ -84,4 +88,8 @@ typedef u_int SOCKET;
 #define THREAD_PRIORITY_ABOVE_NORMAL    (-2)
 #endif
 
-#endif // _BITCOIN_COMPAT_H
+#if HAVE_DECL_STRNLEN == 0
+size_t strnlen( const char *start, size_t max_len);
+#endif // HAVE_DECL_STRNLEN
+
+#endif // BITCOIN_COMPAT_H

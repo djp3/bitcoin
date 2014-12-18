@@ -5,13 +5,15 @@
 #include "core_io.h"
 
 #include "base58.h"
-#include "core.h"
+#include "primitives/transaction.h"
 #include "script/script.h"
 #include "script/standard.h"
 #include "serialize.h"
+#include "streams.h"
 #include "univalue/univalue.h"
 #include "util.h"
 #include "utilmoneystr.h"
+#include "utilstrencodings.h"
 
 #include <boost/foreach.hpp>
 
@@ -127,4 +129,6 @@ void TxToUniv(const CTransaction& tx, const uint256& hashBlock, UniValue& entry)
 
     if (hashBlock != 0)
         entry.pushKV("blockhash", hashBlock.GetHex());
+
+    entry.pushKV("hex", EncodeHexTx(tx)); // the hex-encoded transaction. used the name "hex" to be consistent with the verbose output of "getrawtransaction".
 }

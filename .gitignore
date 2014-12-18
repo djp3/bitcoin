@@ -45,6 +45,7 @@ src/qt/test/moc*.cpp
 
 .deps
 .dirstamp
+.libs
 .*.swp
 *.*~*
 *.bak
@@ -65,6 +66,10 @@ src/qt/test/moc*.cpp
 
 *.json.h
 *.raw.h
+
+#libtool object files
+*.lo
+*.la
 
 # Compilation and Qt preprocessor part
 *.qm
@@ -99,12 +104,15 @@ linux-coverage-build
 linux-build
 win32-build
 qa/pull-tester/run-bitcoind-for-test.sh
-qa/pull-tester/build-tests.sh
+qa/pull-tester/tests-config.sh
+qa/pull-tester/cache/*
+qa/pull-tester/test.*/*
 
 !src/leveldb*/Makefile
 
-#djp3 stuff
 doc/doxygen
+
+#djp3 stuff
 libtool
 configure.lineno
 .lineno
@@ -112,4 +120,3 @@ src/bitcoin-config.h
 src/bitcoin-config.h.in
 src/m4
 src/stamp-h1
-
