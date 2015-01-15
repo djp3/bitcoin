@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2014 The Bitcoin developers
+// Copyright (c) 2009-2014 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -240,7 +240,7 @@ static bool rest_tx(AcceptedConnection* conn,
         throw RESTERR(HTTP_BAD_REQUEST, "Invalid hash: " + hashStr);
 
     CTransaction tx;
-    uint256 hashBlock = 0;
+    uint256 hashBlock = uint256();
     if (!GetTransaction(hash, tx, hashBlock, true))
         throw RESTERR(HTTP_NOT_FOUND, hashStr + " not found");
 

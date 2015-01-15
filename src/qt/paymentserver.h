@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2014 The Bitcoin developers
+// Copyright (c) 2011-2014 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -90,6 +90,9 @@ public:
 
     // This is now public, because we use it in paymentservertests.cpp
     static bool readPaymentRequestFromFile(const QString& filename, PaymentRequestPlus& request);
+
+    // Verify that the payment request network matches the client network
+    static bool verifyNetwork(const payments::PaymentDetails& requestDetails);
 
 signals:
     // Fired when a valid payment request is received

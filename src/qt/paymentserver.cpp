@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2014 The Bitcoin developers
+// Copyright (c) 2011-2014 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -46,7 +46,6 @@
 #include <QUrlQuery>
 #endif
 
-using namespace boost;
 using namespace std;
 
 const int BITCOIN_IPC_CONNECT_TIMEOUT = 1000; // milliseconds
@@ -522,8 +521,7 @@ bool PaymentServer::processPaymentRequest(PaymentRequestPlus& request, SendCoins
         const payments::PaymentDetails& details = request.getDetails();
 
         // Payment request network matches client network?
-        if (details.network() != Params().NetworkIDString())
-        {
+        if (!verifyNetwork(request.getDetails())) {
             emit message(tr("Payment request rejected"), tr("Payment request network doesn't match client network."),
                 CClientUIInterface::MSG_ERROR);
 
@@ -667,8 +665,7 @@ void PaymentServer::netRequestFinished(QNetworkReply* reply)
 
     // BIP70 DoS protection
     if (reply->size() > BIP70_MAX_PAYMENTREQUEST_SIZE) {
-        QString msg = tr("Payment request %2 is too large (%3 bytes, allowed %4 bytes).")
-            .arg(__func__)
+        QString msg = tr("Payment request %1 is too large (%2 bytes, allowed %3 bytes).")
             .arg(reply->request().url().toString())
             .arg(reply->size())
             .arg(BIP70_MAX_PAYMENTREQUEST_SIZE);
@@ -746,4 +743,16 @@ void PaymentServer::handlePaymentACK(const QString& paymentACKMsg)
 {
     // currently we don't futher process or store the paymentACK message
     emit message(tr("Payment acknowledged"), paymentACKMsg, CClientUIInterface::ICON_INFORMATION | CClientUIInterface::MODAL);
+}
+
+bool PaymentServer::verifyNetwork(const payments::PaymentDetails& requestDetails)
+{
+    bool fVerified = requestDetails.network() == Params().NetworkIDString();
+    if (!fVerified) {
+        qWarning() << QString("PaymentServer::%1: Payment request network \"%2\" doesn't match client network \"%3\".")
+            .arg(__func__)
+            .arg(QString::fromStdString(requestDetails.network()))
+            .arg(QString::fromStdString(Params().NetworkIDString()));
+    }
+    return fVerified;
 }
