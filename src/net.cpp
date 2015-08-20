@@ -12,10 +12,12 @@
 #include "addrman.h"
 #include "chainparams.h"
 #include "clientversion.h"
+#include "crypto/common.h"
+#include "hash.h"
 #include "primitives/transaction.h"
 #include "scheduler.h"
 #include "ui_interface.h"
-#include "crypto/common.h"
+#include "utilstrencodings.h"
 
 #ifdef WIN32
 #include <string.h>
@@ -78,9 +80,10 @@ static CNode* pnodeLocalHost = NULL;
 uint64_t nLocalHostNonce = 0;
 static std::vector<ListenSocket> vhListenSocket;
 CAddrMan addrman;
-int nMaxConnections = 125;
+int nMaxConnections = DEFAULT_MAX_PEER_CONNECTIONS;
 int nWhiteConnections = 0;
 bool fAddressesInitialized = false;
+std::string strSubVersion;
 
 vector<CNode*> vNodes;
 CCriticalSection cs_vNodes;
@@ -386,6 +389,12 @@ CNode* ConnectNode(CAddress addrConnect, const char *pszDest)
     if (pszDest ? ConnectSocketByName(addrConnect, hSocket, pszDest, Params().GetDefaultPort(), nConnectTimeout, &proxyConnectionFailed) :
                   ConnectSocket(addrConnect, hSocket, nConnectTimeout, &proxyConnectionFailed))
     {
+        if (!IsSelectableSocket(hSocket)) {
+            LogPrintf("Cannot create connection: non-selectable socket created (fd >= FD_SETSIZE ?)\n");
+            CloseSocket(hSocket);
+            return NULL;
+        }
+
         addrman.Attempt(addrConnect);
 
         // Add node
@@ -437,7 +446,7 @@ void CNode::PushVersion()
     else
         LogPrint("net", "send version message: version %d, blocks=%d, us=%s, peer=%d\n", PROTOCOL_VERSION, nBestHeight, addrMe.ToString(), id);
     PushMessage("version", PROTOCOL_VERSION, nLocalServices, nTime, addrYou, addrMe,
-                nLocalHostNonce, FormatSubVersion(CLIENT_NAME, CLIENT_VERSION, std::vector<string>()), nBestHeight, true);
+                nLocalHostNonce, strSubVersion, nBestHeight, true);
 }
 
 
@@ -948,6 +957,11 @@ void ThreadSocketHandler()
                     int nErr = WSAGetLastError();
                     if (nErr != WSAEWOULDBLOCK)
                         LogPrintf("socket error accept failed: %s\n", NetworkErrorString(nErr));
+                }
+                else if (!IsSelectableSocket(hSocket))
+                {
+                    LogPrintf("connection from %s dropped: non-selectable socket\n", addr.ToString());
+                    CloseSocket(hSocket);
                 }
                 else if (nInbound >= nMaxInbound)
                 {
@@ -1597,6 +1611,13 @@ bool BindListenPort(const CService &addrBind, string& strError, bool fWhiteliste
         LogPrintf("%s\n", strError);
         return false;
     }
+    if (!IsSelectableSocket(hListenSocket))
+    {
+        strError = "Error: Couldn't create a listenable socket for incoming connections";
+        LogPrintf("%s\n", strError);
+        return false;
+    }
+
 
 #ifndef WIN32
 #ifdef SO_NOSIGPIPE
@@ -2040,7 +2061,7 @@ unsigned int SendBufferSize() { return 1000*GetArg("-maxsendbuffer", 1*1000); }
 
 CNode::CNode(SOCKET hSocketIn, const CAddress& addrIn, const std::string& addrNameIn, bool fInboundIn) :
     ssSend(SER_NETWORK, INIT_PROTO_VERSION),
-    addrKnown(5000, 0.001, insecure_rand()),
+    addrKnown(5000, 0.001),
     setInventoryKnown(SendBufferSize() / 1000)
 {
     nServices = 0;
@@ -2165,8 +2186,10 @@ void CNode::EndMessage() UNLOCK_FUNCTION(cs_vSend)
         Fuzz(GetArg("-fuzzmessagestest", 10));
 
     if (ssSend.size() == 0)
+    {
+        LEAVE_CRITICAL_SECTION(cs_vSend);
         return;
-
+    }
     // Set the size
     unsigned int nSize = ssSend.size() - CMessageHeader::HEADER_SIZE;
     WriteLE32((uint8_t*)&ssSend[CMessageHeader::MESSAGE_SIZE_OFFSET], nSize);
@@ -2296,7 +2319,7 @@ void DumpBanlist()
 {
     int64_t nStart = GetTimeMillis();
 
-    CNode::SweepBanned(); //clean unused entires (if bantime has expired)
+    CNode::SweepBanned(); //clean unused entries (if bantime has expired)
 
     CBanDB bandb;
     banmap_t banmap;
