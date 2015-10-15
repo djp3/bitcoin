@@ -28,6 +28,7 @@ class SendCoinsRecipient;
 class UnitDisplayStatusBarControl;
 class WalletFrame;
 class WalletModel;
+class HelpMessageDialog;
 
 class CWallet;
 
@@ -113,6 +114,7 @@ private:
     QMenu *trayIconMenu;
     Notificator *notificator;
     RPCConsole *rpcConsole;
+    HelpMessageDialog *helpMessageDialog;
 
     /** Keep track of previous number of blocks, to detect progress */
     int prevBlocks;
@@ -194,6 +196,8 @@ private Q_SLOTS:
     void optionsClicked();
     /** Show about dialog */
     void aboutClicked();
+    /** Show debug window */
+    void showDebugWindow();
     /** Show help message dialog */
     void showHelpMessageClicked();
 #ifndef Q_OS_MAC

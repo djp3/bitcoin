@@ -12,13 +12,14 @@
 #include "protocol.h"
 #include "sync.h"
 #include "timedata.h"
+#include "ui_interface.h"
 #include "util.h"
 #include "utilstrencodings.h"
 #include "version.h"
 
 #include <boost/foreach.hpp>
 
-#include "univalue/univalue.h"
+#include <univalue.h>
 
 using namespace std;
 
@@ -96,6 +97,7 @@ UniValue getpeerinfo(const UniValue& params, bool fHelp)
             "    \"conntime\": ttt,           (numeric) The connection time in seconds since epoch (Jan 1 1970 GMT)\n"
             "    \"timeoffset\": ttt,         (numeric) The time offset in seconds\n"
             "    \"pingtime\": n,             (numeric) ping time\n"
+            "    \"minping\": n,              (numeric) minimum observed ping time\n"
             "    \"pingwait\": n,             (numeric) ping wait\n"
             "    \"version\": v,              (numeric) The peer version, such as 7001\n"
             "    \"subver\": \"/Satoshi:0.8.5/\",  (string) The string version\n"
@@ -139,6 +141,7 @@ UniValue getpeerinfo(const UniValue& params, bool fHelp)
         obj.push_back(Pair("conntime", stats.nTimeConnected));
         obj.push_back(Pair("timeoffset", stats.nTimeOffset));
         obj.push_back(Pair("pingtime", stats.dPingTime));
+        obj.push_back(Pair("minping", stats.dPingMin));
         if (stats.dPingWait > 0.0)
             obj.push_back(Pair("pingwait", stats.dPingWait));
         obj.push_back(Pair("version", stats.nVersion));
@@ -529,6 +532,8 @@ UniValue setban(const UniValue& params, bool fHelp)
     }
 
     DumpBanlist(); //store banlist to disk
+    uiInterface.BannedListChanged();
+
     return NullUniValue;
 }
 
@@ -575,6 +580,7 @@ UniValue clearbanned(const UniValue& params, bool fHelp)
 
     CNode::ClearBanned();
     DumpBanlist(); //store banlist to disk
+    uiInterface.BannedListChanged();
 
     return NullUniValue;
 }
