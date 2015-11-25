@@ -186,7 +186,7 @@ UniValue getrawtransaction(const UniValue& params, bool fHelp)
 
     CTransaction tx;
     uint256 hashBlock;
-    if (!GetTransaction(hash, tx, hashBlock, true))
+    if (!GetTransaction(hash, tx, Params().GetConsensus(), hashBlock, true))
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "No information available about transaction");
 
     string strHex = EncodeHexTx(tx);
@@ -256,7 +256,7 @@ UniValue gettxoutproof(const UniValue& params, bool fHelp)
     if (pblockindex == NULL)
     {
         CTransaction tx;
-        if (!GetTransaction(oneTxid, tx, hashBlock, false) || hashBlock.IsNull())
+        if (!GetTransaction(oneTxid, tx, Params().GetConsensus(), hashBlock, false) || hashBlock.IsNull())
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Transaction not yet in block");
         if (!mapBlockIndex.count(hashBlock))
             throw JSONRPCError(RPC_INTERNAL_ERROR, "Transaction index corrupt");
@@ -264,7 +264,7 @@ UniValue gettxoutproof(const UniValue& params, bool fHelp)
     }
 
     CBlock block;
-    if(!ReadBlockFromDisk(block, pblockindex))
+    if(!ReadBlockFromDisk(block, pblockindex, Params().GetConsensus()))
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Can't read block from disk");
 
     unsigned int ntxFound = 0;
@@ -343,9 +343,9 @@ UniValue verifytxoutproof(const UniValue& params, bool fHelp)
 
 UniValue createrawtransaction(const UniValue& params, bool fHelp)
 {
-    if (fHelp || params.size() != 2)
+    if (fHelp || params.size() < 2 || params.size() > 3)
         throw runtime_error(
-            "createrawtransaction [{\"txid\":\"id\",\"vout\":n},...] {\"address\":amount,\"data\":\"hex\",...}\n"
+            "createrawtransaction [{\"txid\":\"id\",\"vout\":n},...] {\"address\":amount,\"data\":\"hex\",...} ( locktime )\n"
             "\nCreate a transaction spending the given inputs and creating new outputs.\n"
             "Outputs can be addresses or data.\n"
             "Returns hex-encoded raw transaction.\n"
@@ -367,6 +367,7 @@ UniValue createrawtransaction(const UniValue& params, bool fHelp)
             "      \"data\": \"hex\",     (string, required) The key is \"data\", the value is hex encoded data\n"
             "      ...\n"
             "    }\n"
+            "3. locktime                (numeric, optional, default=0) Raw locktime. Non-0 value also locktime-activates inputs\n"
             "\nResult:\n"
             "\"transaction\"            (string) hex string of the transaction\n"
 
@@ -378,12 +379,21 @@ UniValue createrawtransaction(const UniValue& params, bool fHelp)
         );
 
     LOCK(cs_main);
-    RPCTypeCheck(params, boost::assign::list_of(UniValue::VARR)(UniValue::VOBJ));
+    RPCTypeCheck(params, boost::assign::list_of(UniValue::VARR)(UniValue::VOBJ)(UniValue::VNUM), true);
+    if (params[0].isNull() || params[1].isNull())
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, arguments 1 and 2 must be non-null");
 
     UniValue inputs = params[0].get_array();
     UniValue sendTo = params[1].get_obj();
 
     CMutableTransaction rawTx;
+
+    if (params.size() > 2 && !params[2].isNull()) {
+        int64_t nLockTime = params[2].get_int64();
+        if (nLockTime < 0 || nLockTime > std::numeric_limits<uint32_t>::max())
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, locktime out of range");
+        rawTx.nLockTime = nLockTime;
+    }
 
     for (unsigned int idx = 0; idx < inputs.size(); idx++) {
         const UniValue& input = inputs[idx];
@@ -398,7 +408,9 @@ UniValue createrawtransaction(const UniValue& params, bool fHelp)
         if (nOutput < 0)
             throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, vout must be positive");
 
-        CTxIn in(COutPoint(txid, nOutput));
+        uint32_t nSequence = (rawTx.nLockTime ? std::numeric_limits<uint32_t>::max() - 1 : std::numeric_limits<uint32_t>::max());
+        CTxIn in(COutPoint(txid, nOutput), CScript(), nSequence);
+
         rawTx.vin.push_back(in);
     }
 
@@ -521,7 +533,6 @@ UniValue decodescript(const UniValue& params, bool fHelp)
             + HelpExampleRpc("decodescript", "\"hexstring\"")
         );
 
-    LOCK(cs_main);
     RPCTypeCheck(params, boost::assign::list_of(UniValue::VSTR));
 
     UniValue r(UniValue::VOBJ);
@@ -836,7 +847,7 @@ UniValue sendrawtransaction(const UniValue& params, bool fHelp)
         // push to local node and sync with wallets
         CValidationState state;
         bool fMissingInputs;
-        if (!AcceptToMemoryPool(mempool, state, tx, false, &fMissingInputs, !fOverrideFees)) {
+        if (!AcceptToMemoryPool(mempool, state, tx, false, &fMissingInputs, false, !fOverrideFees)) {
             if (state.IsInvalid()) {
                 throw JSONRPCError(RPC_TRANSACTION_REJECTED, strprintf("%i: %s", state.GetRejectCode(), state.GetRejectReason()));
             } else {

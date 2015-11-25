@@ -202,7 +202,7 @@ public:
     void createPaymentServer();
 #endif
     /// Create options model
-    void createOptionsModel();
+    void createOptionsModel(bool resetSettings);
     /// Create main window
     void createWindow(const NetworkStyle *networkStyle);
     /// Create splash screen
@@ -352,9 +352,9 @@ void BitcoinApplication::createPaymentServer()
 }
 #endif
 
-void BitcoinApplication::createOptionsModel()
+void BitcoinApplication::createOptionsModel(bool resetSettings)
 {
-    optionsModel = new OptionsModel();
+    optionsModel = new OptionsModel(NULL, resetSettings);
 }
 
 void BitcoinApplication::createWindow(const NetworkStyle *networkStyle)
@@ -563,7 +563,7 @@ int main(int argc, char *argv[])
 
     // Show help message immediately after parsing command-line options (for "-lang") and setting locale,
     // but before showing splash screen.
-    if (mapArgs.count("-?") || mapArgs.count("-help") || mapArgs.count("-version"))
+    if (mapArgs.count("-?") || mapArgs.count("-h") || mapArgs.count("-help") || mapArgs.count("-version"))
     {
         HelpMessageDialog help(NULL, mapArgs.count("-version"));
         help.showOrPrint();
@@ -597,8 +597,10 @@ int main(int argc, char *argv[])
     // - Needs to be done before createOptionsModel
 
     // Check for -testnet or -regtest parameter (Params() calls are only valid after this clause)
-    if (!SelectParamsFromCommandLine()) {
-        QMessageBox::critical(0, QObject::tr("Bitcoin Core"), QObject::tr("Error: Invalid combination of -regtest and -testnet."));
+    try {
+        SelectParams(ChainNameFromCommandLine());
+    } catch(std::exception &e) {
+        QMessageBox::critical(0, QObject::tr("Bitcoin Core"), QObject::tr("Error: %1").arg(e.what()));
         return 1;
     }
 #ifdef ENABLE_WALLET
@@ -643,7 +645,7 @@ int main(int argc, char *argv[])
     qInstallMessageHandler(DebugMessageHandler);
 #endif
     // Load GUI settings from QSettings
-    app.createOptionsModel();
+    app.createOptionsModel(mapArgs.count("-resetguisettings") != 0);
 
     // Subscribe to global signals from core
     uiInterface.InitMessage.connect(InitMessage);

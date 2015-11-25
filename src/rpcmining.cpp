@@ -157,7 +157,7 @@ UniValue generate(const UniValue& params, bool fHelp)
     UniValue blockHashes(UniValue::VARR);
     while (nHeight < nHeightEnd)
     {
-        auto_ptr<CBlockTemplate> pblocktemplate(CreateNewBlock(coinbaseScript->reserveScript));
+        auto_ptr<CBlockTemplate> pblocktemplate(CreateNewBlock(Params(), coinbaseScript->reserveScript));
         if (!pblocktemplate.get())
             throw JSONRPCError(RPC_INTERNAL_ERROR, "Couldn't create new block");
         CBlock *pblock = &pblocktemplate->block;
@@ -171,7 +171,7 @@ UniValue generate(const UniValue& params, bool fHelp)
             ++pblock->nNonce;
         }
         CValidationState state;
-        if (!ProcessNewBlock(state, NULL, pblock, true, NULL))
+        if (!ProcessNewBlock(state, Params(), NULL, pblock, true, NULL))
             throw JSONRPCError(RPC_INTERNAL_ERROR, "ProcessNewBlock, block not accepted");
         ++nHeight;
         blockHashes.push_back(pblock->GetHash().GetHex());
@@ -211,7 +211,7 @@ UniValue setgenerate(const UniValue& params, bool fHelp)
     if (params.size() > 0)
         fGenerate = params[0].get_bool();
 
-    int nGenProcLimit = -1;
+    int nGenProcLimit = GetArg("-genproclimit", DEFAULT_GENERATE_THREADS);
     if (params.size() > 1)
     {
         nGenProcLimit = params[1].get_int();
@@ -259,7 +259,7 @@ UniValue getmininginfo(const UniValue& params, bool fHelp)
     obj.push_back(Pair("currentblocktx",   (uint64_t)nLastBlockTx));
     obj.push_back(Pair("difficulty",       (double)GetDifficulty()));
     obj.push_back(Pair("errors",           GetWarnings("statusbar")));
-    obj.push_back(Pair("genproclimit",     (int)GetArg("-genproclimit", -1)));
+    obj.push_back(Pair("genproclimit",     (int)GetArg("-genproclimit", DEFAULT_GENERATE_THREADS)));
     obj.push_back(Pair("networkhashps",    getnetworkhashps(params, false)));
     obj.push_back(Pair("pooledtx",         (uint64_t)mempool.size()));
     obj.push_back(Pair("testnet",          Params().TestnetToBeDeprecatedFieldRPC()));
@@ -426,7 +426,7 @@ UniValue getblocktemplate(const UniValue& params, bool fHelp)
             if (block.hashPrevBlock != pindexPrev->GetBlockHash())
                 return "inconclusive-not-best-prevblk";
             CValidationState state;
-            TestBlockValidity(state, block, pindexPrev, false, true);
+            TestBlockValidity(state, Params(), block, pindexPrev, false, true);
             return BIP22ValidationResult(state);
         }
     }
@@ -510,7 +510,7 @@ UniValue getblocktemplate(const UniValue& params, bool fHelp)
             pblocktemplate = NULL;
         }
         CScript scriptDummy = CScript() << OP_TRUE;
-        pblocktemplate = CreateNewBlock(scriptDummy);
+        pblocktemplate = CreateNewBlock(Params(), scriptDummy);
         if (!pblocktemplate)
             throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
 
@@ -652,7 +652,7 @@ UniValue submitblock(const UniValue& params, bool fHelp)
     CValidationState state;
     submitblock_StateCatcher sc(block.GetHash());
     RegisterValidationInterface(&sc);
-    bool fAccepted = ProcessNewBlock(state, NULL, &block, true, NULL);
+    bool fAccepted = ProcessNewBlock(state, Params(), NULL, &block, true, NULL);
     UnregisterValidationInterface(&sc);
     if (fBlockPresent)
     {

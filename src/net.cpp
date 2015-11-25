@@ -12,6 +12,7 @@
 #include "addrman.h"
 #include "chainparams.h"
 #include "clientversion.h"
+#include "consensus/consensus.h"
 #include "crypto/common.h"
 #include "hash.h"
 #include "primitives/transaction.h"
@@ -215,6 +216,7 @@ void AdvertizeLocal(CNode *pnode)
         }
         if (addrLocal.IsRoutable())
         {
+            LogPrintf("AdvertizeLocal: advertizing address %s\n", addrLocal.ToString());
             pnode->PushAddress(addrLocal);
         }
     }
@@ -259,6 +261,14 @@ bool AddLocal(const CService& addr, int nScore)
 bool AddLocal(const CNetAddr &addr, int nScore)
 {
     return AddLocal(CService(addr, GetListenPort()), nScore);
+}
+
+bool RemoveLocal(const CService& addr)
+{
+    LOCK(cs_mapLocalHost);
+    LogPrintf("RemoveLocal(%s)\n", addr.ToString());
+    mapLocalHost.erase(addr);
+    return true;
 }
 
 /** Make a particular network entirely off-limits (no automatic connects to it) */
@@ -325,6 +335,11 @@ uint64_t CNode::nTotalBytesRecv = 0;
 uint64_t CNode::nTotalBytesSent = 0;
 CCriticalSection CNode::cs_totalBytesRecv;
 CCriticalSection CNode::cs_totalBytesSent;
+
+uint64_t CNode::nMaxOutboundLimit = 0;
+uint64_t CNode::nMaxOutboundTotalBytesSentInCycle = 0;
+uint64_t CNode::nMaxOutboundTimeframe = 60*60*24; //1 day
+uint64_t CNode::nMaxOutboundCycleStartTime = 0;
 
 CNode* FindNode(const CNetAddr& ip)
 {
@@ -445,7 +460,7 @@ void CNode::PushVersion()
     else
         LogPrint("net", "send version message: version %d, blocks=%d, us=%s, peer=%d\n", PROTOCOL_VERSION, nBestHeight, addrMe.ToString(), id);
     PushMessage("version", PROTOCOL_VERSION, nLocalServices, nTime, addrYou, addrMe,
-                nLocalHostNonce, strSubVersion, nBestHeight, true);
+                nLocalHostNonce, strSubVersion, nBestHeight, !GetBoolArg("-blocksonly", DEFAULT_BLOCKSONLY));
 }
 
 
@@ -602,6 +617,7 @@ void CNode::copyStats(CNodeStats &stats)
 {
     stats.nodeid = this->GetId();
     X(nServices);
+    X(fRelayTxes);
     X(nLastSend);
     X(nLastRecv);
     X(nTimeConnected);
@@ -962,6 +978,15 @@ static void AcceptConnection(const ListenSocket& hListenSocket) {
         CloseSocket(hSocket);
         return;
     }
+
+    // According to the internet TCP_NODELAY is not carried into accepted sockets
+    // on all platforms.  Set it again here just to be sure.
+    int set = 1;
+#ifdef WIN32
+    setsockopt(hSocket, IPPROTO_TCP, TCP_NODELAY, (const char*)&set, sizeof(int));
+#else
+    setsockopt(hSocket, IPPROTO_TCP, TCP_NODELAY, (void*)&set, sizeof(int));
+#endif
 
     if (CNode::IsBanned(addr) && !whitelisted)
     {
@@ -1790,8 +1815,11 @@ bool BindListenPort(const CService &addrBind, string& strError, bool fWhiteliste
     // Allow binding if the port is still in TIME_WAIT state after
     // the program was closed and restarted.
     setsockopt(hListenSocket, SOL_SOCKET, SO_REUSEADDR, (void*)&nOne, sizeof(int));
+    // Disable Nagle's algorithm
+    setsockopt(hListenSocket, IPPROTO_TCP, TCP_NODELAY, (void*)&nOne, sizeof(int));
 #else
     setsockopt(hListenSocket, SOL_SOCKET, SO_REUSEADDR, (const char*)&nOne, sizeof(int));
+    setsockopt(hListenSocket, IPPROTO_TCP, TCP_NODELAY, (const char*)&nOne, sizeof(int));
 #endif
 
     // Set to non-blocking, incoming connections will also inherit this
@@ -2071,6 +2099,94 @@ void CNode::RecordBytesSent(uint64_t bytes)
 {
     LOCK(cs_totalBytesSent);
     nTotalBytesSent += bytes;
+
+    uint64_t now = GetTime();
+    if (nMaxOutboundCycleStartTime + nMaxOutboundTimeframe < now)
+    {
+        // timeframe expired, reset cycle
+        nMaxOutboundCycleStartTime = now;
+        nMaxOutboundTotalBytesSentInCycle = 0;
+    }
+
+    // TODO, exclude whitebind peers
+    nMaxOutboundTotalBytesSentInCycle += bytes;
+}
+
+void CNode::SetMaxOutboundTarget(uint64_t limit)
+{
+    LOCK(cs_totalBytesSent);
+    uint64_t recommendedMinimum = (nMaxOutboundTimeframe / 600) * MAX_BLOCK_SIZE;
+    nMaxOutboundLimit = limit;
+
+    if (limit > 0 && limit < recommendedMinimum)
+        LogPrintf("Max outbound target is very small (%s bytes) and will be overshot. Recommended minimum is %s bytes.\n", nMaxOutboundLimit, recommendedMinimum);
+}
+
+uint64_t CNode::GetMaxOutboundTarget()
+{
+    LOCK(cs_totalBytesSent);
+    return nMaxOutboundLimit;
+}
+
+uint64_t CNode::GetMaxOutboundTimeframe()
+{
+    LOCK(cs_totalBytesSent);
+    return nMaxOutboundTimeframe;
+}
+
+uint64_t CNode::GetMaxOutboundTimeLeftInCycle()
+{
+    LOCK(cs_totalBytesSent);
+    if (nMaxOutboundLimit == 0)
+        return 0;
+
+    if (nMaxOutboundCycleStartTime == 0)
+        return nMaxOutboundTimeframe;
+
+    uint64_t cycleEndTime = nMaxOutboundCycleStartTime + nMaxOutboundTimeframe;
+    uint64_t now = GetTime();
+    return (cycleEndTime < now) ? 0 : cycleEndTime - GetTime();
+}
+
+void CNode::SetMaxOutboundTimeframe(uint64_t timeframe)
+{
+    LOCK(cs_totalBytesSent);
+    if (nMaxOutboundTimeframe != timeframe)
+    {
+        // reset measure-cycle in case of changing
+        // the timeframe
+        nMaxOutboundCycleStartTime = GetTime();
+    }
+    nMaxOutboundTimeframe = timeframe;
+}
+
+bool CNode::OutboundTargetReached(bool historicalBlockServingLimit)
+{
+    LOCK(cs_totalBytesSent);
+    if (nMaxOutboundLimit == 0)
+        return false;
+
+    if (historicalBlockServingLimit)
+    {
+        // keep a large enought buffer to at least relay each block once
+        uint64_t timeLeftInCycle = GetMaxOutboundTimeLeftInCycle();
+        uint64_t buffer = timeLeftInCycle / 600 * MAX_BLOCK_SIZE;
+        if (buffer >= nMaxOutboundLimit || nMaxOutboundTotalBytesSentInCycle >= nMaxOutboundLimit - buffer)
+            return true;
+    }
+    else if (nMaxOutboundTotalBytesSentInCycle >= nMaxOutboundLimit)
+        return true;
+
+    return false;
+}
+
+uint64_t CNode::GetOutboundTargetBytesLeft()
+{
+    LOCK(cs_totalBytesSent);
+    if (nMaxOutboundLimit == 0)
+        return 0;
+
+    return (nMaxOutboundTotalBytesSentInCycle >= nMaxOutboundLimit) ? 0 : nMaxOutboundLimit - nMaxOutboundTotalBytesSentInCycle;
 }
 
 uint64_t CNode::GetTotalBytesRecv()
