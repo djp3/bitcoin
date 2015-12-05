@@ -10,6 +10,7 @@
 #include "coins.h"
 #include "consensus/validation.h"
 #include "main.h"
+#include "policy/policy.h"
 #include "primitives/transaction.h"
 #include "rpcserver.h"
 #include "streams.h"
@@ -311,6 +312,7 @@ UniValue mempoolToJSON(bool fVerbose = false)
             UniValue info(UniValue::VOBJ);
             info.push_back(Pair("size", (int)e.GetTxSize()));
             info.push_back(Pair("fee", ValueFromAmount(e.GetFee())));
+            info.push_back(Pair("modifiedfee", ValueFromAmount(e.GetModifiedFee())));
             info.push_back(Pair("time", e.GetTime()));
             info.push_back(Pair("height", (int)e.GetHeight()));
             info.push_back(Pair("startingpriority", e.GetPriority(e.GetHeight())));
@@ -368,6 +370,7 @@ UniValue getrawmempool(const UniValue& params, bool fHelp)
             "  \"transactionid\" : {       (json object)\n"
             "    \"size\" : n,             (numeric) transaction size in bytes\n"
             "    \"fee\" : n,              (numeric) transaction fee in " + CURRENCY_UNIT + "\n"
+            "    \"modifiedfee\" : n,      (numeric) transaction fee with fee deltas used for mining priority\n"
             "    \"time\" : n,             (numeric) local time transaction entered pool in seconds since 1 Jan 1970 GMT\n"
             "    \"height\" : n,           (numeric) block height when transaction entered pool\n"
             "    \"startingpriority\" : n, (numeric) priority when transaction entered pool\n"
@@ -688,7 +691,7 @@ UniValue verifychain(const UniValue& params, bool fHelp)
     if (params.size() > 1)
         nCheckDepth = params[1].get_int();
 
-    return CVerifyDB().VerifyDB(pcoinsTip, nCheckLevel, nCheckDepth);
+    return CVerifyDB().VerifyDB(Params(), pcoinsTip, nCheckLevel, nCheckDepth);
 }
 
 /** Implementation of IsSuperMajority with better feedback */
@@ -916,9 +919,11 @@ UniValue getmempoolinfo(const UniValue& params, bool fHelp)
             "\nReturns details on the active state of the TX memory pool.\n"
             "\nResult:\n"
             "{\n"
-            "  \"size\": xxxxx                (numeric) Current tx count\n"
-            "  \"bytes\": xxxxx               (numeric) Sum of all tx sizes\n"
-            "  \"usage\": xxxxx               (numeric) Total memory usage for the mempool\n"
+            "  \"size\": xxxxx,               (numeric) Current tx count\n"
+            "  \"bytes\": xxxxx,              (numeric) Sum of all tx sizes\n"
+            "  \"usage\": xxxxx,              (numeric) Total memory usage for the mempool\n"
+            "  \"maxmempool\": xxxxx,         (numeric) Maximum memory usage for the mempool\n"
+            "  \"mempoolminfee\": xxxxx       (numeric) Minimum fee for tx to be accepted\n"
             "}\n"
             "\nExamples:\n"
             + HelpExampleCli("getmempoolinfo", "")
@@ -956,7 +961,7 @@ UniValue invalidateblock(const UniValue& params, bool fHelp)
     }
 
     if (state.IsValid()) {
-        ActivateBestChain(state);
+        ActivateBestChain(state, Params());
     }
 
     if (!state.IsValid()) {
@@ -995,7 +1000,7 @@ UniValue reconsiderblock(const UniValue& params, bool fHelp)
     }
 
     if (state.IsValid()) {
-        ActivateBestChain(state);
+        ActivateBestChain(state, Params());
     }
 
     if (!state.IsValid()) {
