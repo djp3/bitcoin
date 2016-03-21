@@ -1,5 +1,5 @@
 #!/usr/bin/env python2
-# Copyright (c) 2014 The Bitcoin Core developers
+# Copyright (c) 2014-2015 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -40,6 +40,15 @@ if not vars().has_key('ENABLE_UTILS'):
     ENABLE_UTILS=0
 if not vars().has_key('ENABLE_ZMQ'):
     ENABLE_ZMQ=0
+    
+# python-zmq may not be installed. Handle this gracefully and with some helpful info
+if ENABLE_ZMQ:
+    try:
+        import zmq
+    except ImportError:
+        print("WARNING: \"import zmq\" failed. Setting ENABLE_ZMQ=0. " \
+            "To run zmq tests, see dependency info in /qa/README.md.")
+        ENABLE_ZMQ=0
 
 ENABLE_COVERAGE=0
 
@@ -62,8 +71,10 @@ for arg in sys.argv[1:]:
 
 #Set env vars
 buildDir = BUILDDIR
-os.environ["BITCOIND"] = buildDir + '/src/bitcoind' + EXEEXT
-os.environ["BITCOINCLI"] = buildDir + '/src/bitcoin-cli' + EXEEXT
+if "BITCOIND" not in os.environ:
+    os.environ["BITCOIND"] = buildDir + '/src/bitcoind' + EXEEXT
+if "BITCOINCLI" not in os.environ:
+    os.environ["BITCOINCLI"] = buildDir + '/src/bitcoin-cli' + EXEEXT
 
 #Disable Windows tests by default
 if EXEEXT == ".exe" and "-win" not in opts:
@@ -83,6 +94,7 @@ testScripts = [
     'rest.py',
     'mempool_spendcoinbase.py',
     'mempool_reorg.py',
+    'mempool_limit.py',
     'httpbasics.py',
     'multi_rpc.py',
     'zapwallettxes.py',
@@ -100,10 +112,15 @@ testScripts = [
     'sendheaders.py',
     'keypool.py',
     'prioritise_transaction.py',
+    'invalidblockrequest.py',
+    'invalidtxrequest.py',
+    'abandonconflict.py',
+    'p2p-versionbits-warning.py',
 ]
 testScriptsExt = [
     'bip65-cltv.py',
     'bip65-cltv-p2p.py',
+    'bip68-sequence.py',
     'bipdersig-p2p.py',
     'bipdersig.py',
     'getblocktemplate_longpoll.py',
@@ -116,7 +133,6 @@ testScriptsExt = [
 #    'rpcbind_test.py', #temporary, bug in libevent, see #6655
     'smartfees.py',
     'maxblocksinflight.py',
-    'invalidblockrequest.py',
     'p2p-acceptblock.py',
     'mempool_packages.py',
     'maxuploadtarget.py',

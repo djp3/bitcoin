@@ -1,3 +1,7 @@
+// Copyright (c) 2015 The Bitcoin Core developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #ifndef BITCOIN_TEST_TEST_BITCOIN_H
 #define BITCOIN_TEST_TEST_BITCOIN_H
 
@@ -5,6 +9,7 @@
 #include "key.h"
 #include "pubkey.h"
 #include "txdb.h"
+#include "txmempool.h"
 
 #include <boost/filesystem.hpp>
 #include <boost/thread.hpp>
@@ -67,7 +72,8 @@ struct TestMemPoolEntryHelper
     bool hadNoDependencies;
     bool spendsCoinbase;
     unsigned int sigOpCount;
-    
+    LockPoints lp;
+
     TestMemPoolEntryHelper() :
         nFee(0), nTime(0), dPriority(0.0), nHeight(1),
         hadNoDependencies(false), spendsCoinbase(false), sigOpCount(1) { }

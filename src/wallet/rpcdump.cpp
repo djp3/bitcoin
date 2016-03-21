@@ -1,10 +1,10 @@
-// Copyright (c) 2009-2014 The Bitcoin Core developers
+// Copyright (c) 2009-2015 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include "base58.h"
 #include "chain.h"
-#include "rpcserver.h"
+#include "rpc/server.h"
 #include "init.h"
 #include "main.h"
 #include "script/script.h"
@@ -192,7 +192,7 @@ UniValue importaddress(const UniValue& params, bool fHelp)
             "3. rescan               (boolean, optional, default=true) Rescan the wallet for transactions\n"
             "4. p2sh                 (boolean, optional, default=false) Add the P2SH version of the script as well\n"
             "\nNote: This call can take minutes to complete if rescan is true.\n"
-            "If you have the full public key, you should call importpublickey instead of this.\n"
+            "If you have the full public key, you should call importpubkey instead of this.\n"
             "\nExamples:\n"
             "\nImport a script with rescan\n"
             + HelpExampleCli("importaddress", "\"myscript\"") +

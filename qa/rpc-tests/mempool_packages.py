@@ -7,6 +7,7 @@
 
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
+from test_framework.mininode import COIN
 
 MAX_ANCESTORS = 25
 MAX_DESCENDANTS = 25
@@ -59,21 +60,53 @@ class MempoolPackagesTest(BitcoinTestFramework):
         descendant_count = 1
         descendant_fees = 0
         descendant_size = 0
-        SATOSHIS = 100000000
 
         for x in reversed(chain):
             assert_equal(mempool[x]['descendantcount'], descendant_count)
             descendant_fees += mempool[x]['fee']
-            assert_equal(mempool[x]['descendantfees'], SATOSHIS*descendant_fees)
+            assert_equal(mempool[x]['modifiedfee'], mempool[x]['fee'])
+            assert_equal(mempool[x]['descendantfees'], descendant_fees * COIN)
             descendant_size += mempool[x]['size']
             assert_equal(mempool[x]['descendantsize'], descendant_size)
             descendant_count += 1
+
+        # Check that descendant modified fees includes fee deltas from
+        # prioritisetransaction
+        self.nodes[0].prioritisetransaction(chain[-1], 0, 1000)
+        mempool = self.nodes[0].getrawmempool(True)
+
+        descendant_fees = 0
+        for x in reversed(chain):
+            descendant_fees += mempool[x]['fee']
+            assert_equal(mempool[x]['descendantfees'], descendant_fees * COIN + 1000)
 
         # Adding one more transaction on to the chain should fail.
         try:
             self.chain_transaction(self.nodes[0], txid, vout, value, fee, 1)
         except JSONRPCException as e:
             print "too-long-ancestor-chain successfully rejected"
+
+        # Check that prioritising a tx before it's added to the mempool works
+        # First clear the mempool by mining a block.
+        self.nodes[0].generate(1)
+        sync_blocks(self.nodes)
+        assert_equal(len(self.nodes[0].getrawmempool()), 0)
+        # Prioritise a transaction that has been mined, then add it back to the
+        # mempool by using invalidateblock.
+        self.nodes[0].prioritisetransaction(chain[-1], 0, 2000)
+        self.nodes[0].invalidateblock(self.nodes[0].getbestblockhash())
+        # Keep node1's tip synced with node0
+        self.nodes[1].invalidateblock(self.nodes[1].getbestblockhash())
+
+        # Now check that the transaction is in the mempool, with the right modified fee
+        mempool = self.nodes[0].getrawmempool(True)
+
+        descendant_fees = 0
+        for x in reversed(chain):
+            descendant_fees += mempool[x]['fee']
+            if (x == chain[-1]):
+                assert_equal(mempool[x]['modifiedfee'], mempool[x]['fee']+satoshi_round(0.00002))
+            assert_equal(mempool[x]['descendantfees'], descendant_fees * COIN + 2000)
 
         # TODO: check that node1's mempool is as expected
 
