@@ -124,3 +124,4 @@ src/bitcoin-config.h
 src/bitcoin-config.h.in
 src/m4
 src/stamp-h1
+src/build-aux
