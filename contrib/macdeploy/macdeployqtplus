@@ -819,12 +819,14 @@ if config.dmg is not None:
              tell disk "$disk"
                    open
                    set current view of container window to icon view
+				   -- djp3: I had to comment out the line below to get this to work
                    set toolbar visible of container window to false
                    set statusbar visible of container window to false
                    set the bounds of container window to {$window_bounds}
                    set theViewOptions to the icon view options of container window
                    set arrangement of theViewOptions to not arranged
                    set icon size of theViewOptions to $icon_size
+				   -- djp3: I had to comment out the line below to get this to work
                    $background_commands
                    $items_positions
                    close -- close/reopen works around a bug...
