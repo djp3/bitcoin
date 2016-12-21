@@ -791,7 +791,7 @@ if config.dmg is not None:
         except subprocess.CalledProcessError as e:
             sys.exit(e.returncode)
         
-        m = re.search("/Volumes/(.+$)", output)
+        m = re.search("/Volumes/(.+$)", str(output,"utf-8"))
         disk_root = m.group(0)
         disk_name = m.group(1)
         
@@ -819,14 +819,12 @@ if config.dmg is not None:
              tell disk "$disk"
                    open
                    set current view of container window to icon view
-				   -- djp3: I had to comment out the line below to get this to work
                    set toolbar visible of container window to false
                    set statusbar visible of container window to false
                    set the bounds of container window to {$window_bounds}
                    set theViewOptions to the icon view options of container window
                    set arrangement of theViewOptions to not arranged
                    set icon size of theViewOptions to $icon_size
-				   -- djp3: I had to comment out the line below to get this to work
                    $background_commands
                    $items_positions
                    close -- close/reopen works around a bug...
@@ -870,7 +868,7 @@ if config.dmg is not None:
             print(s)
 
         p = subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE)
-        p.communicate(input=s)
+        p.communicate(input=s.encode("utf-8"))
         if p.returncode:
             print("Error running osascript.")
 

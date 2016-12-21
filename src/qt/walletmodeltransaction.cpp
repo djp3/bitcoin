@@ -4,10 +4,11 @@
 
 #include "walletmodeltransaction.h"
 
+#include "policy/policy.h"
 #include "wallet/wallet.h"
 
-WalletModelTransaction::WalletModelTransaction(const QList<SendCoinsRecipient> &recipients) :
-    recipients(recipients),
+WalletModelTransaction::WalletModelTransaction(const QList<SendCoinsRecipient> &_recipients) :
+    recipients(_recipients),
     walletTransaction(0),
     keyChange(0),
     fee(0)
@@ -33,7 +34,7 @@ CWalletTx *WalletModelTransaction::getTransaction()
 
 unsigned int WalletModelTransaction::getTransactionSize()
 {
-    return (!walletTransaction ? 0 : (::GetSerializeSize(*(CTransaction*)walletTransaction, SER_NETWORK, PROTOCOL_VERSION)));
+    return (!walletTransaction ? 0 : ::GetVirtualTransactionSize(*walletTransaction));
 }
 
 CAmount WalletModelTransaction::getTransactionFee()
@@ -63,7 +64,7 @@ void WalletModelTransaction::reassignAmounts(int nChangePosRet)
                 if (out.amount() <= 0) continue;
                 if (i == nChangePosRet)
                     i++;
-                subtotal += walletTransaction->vout[i].nValue;
+                subtotal += walletTransaction->tx->vout[i].nValue;
                 i++;
             }
             rcp.amount = subtotal;
@@ -72,7 +73,7 @@ void WalletModelTransaction::reassignAmounts(int nChangePosRet)
         {
             if (i == nChangePosRet)
                 i++;
-            rcp.amount = walletTransaction->vout[i].nValue;
+            rcp.amount = walletTransaction->tx->vout[i].nValue;
             i++;
         }
     }

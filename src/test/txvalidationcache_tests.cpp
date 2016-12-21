@@ -4,7 +4,7 @@
 
 #include "consensus/validation.h"
 #include "key.h"
-#include "main.h"
+#include "validation.h"
 #include "miner.h"
 #include "pubkey.h"
 #include "txmempool.h"
@@ -39,6 +39,7 @@ BOOST_FIXTURE_TEST_CASE(tx_mempool_block_doublespend, TestChain100Setup)
     spends.resize(2);
     for (int i = 0; i < 2; i++)
     {
+        spends[i].nVersion = 1;
         spends[i].vin.resize(1);
         spends[i].vin[0].prevout.hash = coinbaseTxns[0].GetHash();
         spends[i].vin[0].prevout.n = 0;
@@ -48,7 +49,7 @@ BOOST_FIXTURE_TEST_CASE(tx_mempool_block_doublespend, TestChain100Setup)
 
         // Sign:
         std::vector<unsigned char> vchSig;
-        uint256 hash = SignatureHash(scriptPubKey, spends[i], 0, SIGHASH_ALL);
+        uint256 hash = SignatureHash(scriptPubKey, spends[i], 0, SIGHASH_ALL, 0, SIGVERSION_BASE);
         BOOST_CHECK(coinbaseKey.Sign(hash, vchSig));
         vchSig.push_back((unsigned char)SIGHASH_ALL);
         spends[i].vin[0].scriptSig << vchSig;
