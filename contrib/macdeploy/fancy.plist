@@ -4,13 +4,13 @@
 <dict>
 	<key>window_bounds</key>
 	<array>
-		<integer>0</integer>
-		<integer>0</integer>
-		<integer>1000</integer>
-		<integer>640</integer>
+		<integer>300</integer>
+		<integer>300</integer>
+		<integer>800</integer>
+		<integer>620</integer>
 	</array>
 	<key>background_picture</key>
-	<string>background.jpg</string>
+	<string>background.tiff</string>
 	<key>icon_size</key>
 	<integer>96</integer>
 	<key>applications_symlink</key>
@@ -19,13 +19,13 @@
 	<dict>
 		<key>Applications</key>
 		<array>
-			<integer>780</integer>
-			<integer>310</integer>
+			<integer>370</integer>
+			<integer>156</integer>
 		</array>
 		<key>Bitcoin-Qt.app</key>
 		<array>
-			<integer>220</integer>
-			<integer>310</integer>
+			<integer>128</integer>
+			<integer>156</integer>
 		</array>
 	</dict>
 </dict>
