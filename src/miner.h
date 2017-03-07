@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2015 The Bitcoin Core developers
+// Copyright (c) 2009-2016 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -143,6 +143,7 @@ private:
     bool fIncludeWitness;
     unsigned int nBlockMaxWeight, nBlockMaxSize;
     bool fNeedSizeAccounting;
+    CFeeRate blockMinFeeRate;
 
     // Information on the current status of the block
     uint64_t nBlockWeight;
@@ -162,7 +163,16 @@ private:
     bool blockFinished;
 
 public:
-    BlockAssembler(const CChainParams& chainparams);
+    struct Options {
+        Options();
+        size_t nBlockMaxWeight;
+        size_t nBlockMaxSize;
+        CFeeRate blockMinFeeRate;
+    };
+
+    BlockAssembler(const CChainParams& params);
+    BlockAssembler(const CChainParams& params, const Options& options);
+
     /** Construct a new block template with coinbase to scriptPubKeyIn */
     std::unique_ptr<CBlockTemplate> CreateNewBlock(const CScript& scriptPubKeyIn);
 

@@ -5,7 +5,7 @@
 DIST_SUBDIRS = secp256k1 univalue
 
 AM_LDFLAGS = $(PTHREAD_CFLAGS) $(LIBTOOL_LDFLAGS) $(HARDENED_LDFLAGS)
-AM_CXXFLAGS = $(HARDENED_CXXFLAGS)
+AM_CXXFLAGS = $(HARDENED_CXXFLAGS) $(ERROR_CXXFLAGS)
 AM_CPPFLAGS = $(HARDENED_CPPFLAGS)
 EXTRA_LIBRARIES =
 
@@ -135,9 +135,11 @@ BITCOIN_CORE_H = \
   support/allocators/secure.h \
   support/allocators/zeroafterfree.h \
   support/cleanse.h \
+  support/events.h \
   support/lockedpool.h \
   sync.h \
   threadsafety.h \
+  threadinterrupt.h \
   timedata.h \
   torcontrol.h \
   txdb.h \
@@ -327,6 +329,7 @@ libbitcoin_util_a_SOURCES = \
   rpc/protocol.cpp \
   support/cleanse.cpp \
   sync.cpp \
+  threadinterrupt.cpp \
   util.cpp \
   utilmoneystr.cpp \
   utilstrencodings.cpp \

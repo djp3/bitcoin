@@ -2,6 +2,7 @@
 # Copyright (c) 2016 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
+"""Test segwit transactions and blocks on P2P network."""
 
 from test_framework.mininode import *
 from test_framework.test_framework import BitcoinTestFramework
@@ -21,9 +22,6 @@ VB_TOP_BITS = 0x20000000
 
 MAX_SIGOP_COST = 80000
 
-'''
-SegWit p2p test.
-'''
 
 # Calculate the virtual size of a witness block:
 # (base + witness/4)
@@ -951,7 +949,6 @@ class SegWitTest(BitcoinTestFramework):
         tx.rehash()
 
         tx_hash = tx.sha256
-        tx_value = tx.vout[0].nValue
 
         # Verify that unnecessary witnesses are rejected.
         self.test_node.announce_tx_and_wait_for_getdata(tx)
@@ -1662,7 +1659,7 @@ class SegWitTest(BitcoinTestFramework):
         # too many sigops (contributing to legacy sigop count).
         checksig_count = (extra_sigops_available // 4) + 1
         scriptPubKey_checksigs = CScript([OP_CHECKSIG]*checksig_count)
-        tx2.vout.append(CTxOut(0, scriptPubKey_checksigs));
+        tx2.vout.append(CTxOut(0, scriptPubKey_checksigs))
         tx2.vin.pop()
         tx2.wit.vtxinwit.pop()
         tx2.vout[0].nValue -= tx.vout[-2].nValue

@@ -2,16 +2,13 @@
 # Copyright (c) 2016 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-#
+"""Test processing of feefilter messages."""
 
 from test_framework.mininode import *
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
 import time
 
-'''
-FeeFilterTest -- test processing of feefilter messages
-'''
 
 def hashToHex(hash):
     return format(hash, '064x')
@@ -21,9 +18,9 @@ def allInvsMatch(invsExpected, testnode):
     for x in range(60):
         with mininode_lock:
             if (sorted(invsExpected) == sorted(testnode.txinvs)):
-                return True;
+                return True
         time.sleep(1)
-    return False;
+    return False
 
 # TestNode: bare-bones "peer".  Used to track which invs are received from a node
 # and to send the node feefilter messages.

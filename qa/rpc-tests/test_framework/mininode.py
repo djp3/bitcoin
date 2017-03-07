@@ -4,23 +4,21 @@
 # Copyright (c) 2010-2016 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
+"""Bitcoin P2P network half-a-node.
 
-#
-# mininode.py - Bitcoin P2P network half-a-node
-#
-# This python code was modified from ArtForz' public domain  half-a-node, as
-# found in the mini-node branch of http://github.com/jgarzik/pynode.
-#
-# NodeConn: an object which manages p2p connectivity to a bitcoin node
-# NodeConnCB: a base class that describes the interface for receiving
-#             callbacks with network messages from a NodeConn
-# CBlock, CTransaction, CBlockHeader, CTxIn, CTxOut, etc....:
-#     data structures that should map to corresponding structures in
-#     bitcoin/primitives
-# msg_block, msg_tx, msg_headers, etc.:
-#     data structures that represent network messages
-# ser_*, deser_*: functions that handle serialization/deserialization
+This python code was modified from ArtForz' public domain  half-a-node, as
+found in the mini-node branch of http://github.com/jgarzik/pynode.
 
+NodeConn: an object which manages p2p connectivity to a bitcoin node
+NodeConnCB: a base class that describes the interface for receiving
+            callbacks with network messages from a NodeConn
+CBlock, CTransaction, CBlockHeader, CTxIn, CTxOut, etc....:
+    data structures that should map to corresponding structures in
+    bitcoin/primitives
+msg_block, msg_tx, msg_headers, etc.:
+    data structures that represent network messages
+ser_*, deser_*: functions that handle serialization/deserialization
+"""
 
 import struct
 import socket
@@ -1540,6 +1538,7 @@ class NodeConnCB(object):
         if conn.ver_send > BIP0031_VERSION:
             conn.send_message(msg_pong(message.nonce))
     def on_reject(self, conn, message): pass
+    def on_open(self, conn): pass
     def on_close(self, conn): pass
     def on_mempool(self, conn): pass
     def on_pong(self, conn, message): pass
@@ -1614,7 +1613,7 @@ class NodeConn(asyncore.dispatcher):
         "regtest": b"\xfa\xbf\xb5\xda",   # regtest
     }
 
-    def __init__(self, dstaddr, dstport, rpc, callback, net="regtest", services=NODE_NETWORK):
+    def __init__(self, dstaddr, dstport, rpc, callback, net="regtest", services=NODE_NETWORK, send_version=True):
         asyncore.dispatcher.__init__(self, map=mininode_socket_map)
         self.log = logging.getLogger("NodeConn(%s:%d)" % (dstaddr, dstport))
         self.dstaddr = dstaddr
@@ -1631,14 +1630,16 @@ class NodeConn(asyncore.dispatcher):
         self.disconnect = False
         self.nServices = 0
 
-        # stuff version msg into sendbuf
-        vt = msg_version()
-        vt.nServices = services
-        vt.addrTo.ip = self.dstaddr
-        vt.addrTo.port = self.dstport
-        vt.addrFrom.ip = "0.0.0.0"
-        vt.addrFrom.port = 0
-        self.send_message(vt, True)
+        if send_version:
+            # stuff version msg into sendbuf
+            vt = msg_version()
+            vt.nServices = services
+            vt.addrTo.ip = self.dstaddr
+            vt.addrTo.port = self.dstport
+            vt.addrFrom.ip = "0.0.0.0"
+            vt.addrFrom.port = 0
+            self.send_message(vt, True)
+
         print('MiniNode: Connecting to Bitcoin Node IP # ' + dstaddr + ':' \
             + str(dstport))
 
@@ -1652,8 +1653,10 @@ class NodeConn(asyncore.dispatcher):
         self.log.debug(msg)
 
     def handle_connect(self):
-        self.show_debug_msg("MiniNode: Connected & Listening: \n")
-        self.state = "connected"
+        if self.state != "connected":
+            self.show_debug_msg("MiniNode: Connected & Listening: \n")
+            self.state = "connected"
+            self.cb.on_open(self)
 
     def handle_close(self):
         self.show_debug_msg("MiniNode: Closing Connection to %s:%d... "
@@ -1681,11 +1684,20 @@ class NodeConn(asyncore.dispatcher):
 
     def writable(self):
         with mininode_lock:
+            pre_connection = self.state == "connecting"
             length = len(self.sendbuf)
-        return (length > 0)
+        return (length > 0 or pre_connection)
 
     def handle_write(self):
         with mininode_lock:
+            # asyncore does not expose socket connection, only the first read/write
+            # event, thus we must check connection manually here to know when we
+            # actually connect
+            if self.state == "connecting":
+                self.handle_connect()
+            if not self.writable():
+                return
+
             try:
                 sent = self.send(self.sendbuf)
             except:

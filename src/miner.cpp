@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2015 The Bitcoin Core developers
+// Copyright (c) 2009-2016 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -30,8 +30,6 @@
 #include <boost/tuple/tuple.hpp>
 #include <queue>
 #include <utility>
-
-using namespace std;
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -74,36 +72,55 @@ int64_t UpdateTime(CBlockHeader* pblock, const Consensus::Params& consensusParam
     return nNewTime - nOldTime;
 }
 
-BlockAssembler::BlockAssembler(const CChainParams& _chainparams)
-    : chainparams(_chainparams)
+BlockAssembler::Options::Options() {
+    blockMinFeeRate = CFeeRate(DEFAULT_BLOCK_MIN_TX_FEE);
+    nBlockMaxWeight = DEFAULT_BLOCK_MAX_WEIGHT;
+    nBlockMaxSize = DEFAULT_BLOCK_MAX_SIZE;
+}
+
+BlockAssembler::BlockAssembler(const CChainParams& params, const Options& options) : chainparams(params)
+{
+    blockMinFeeRate = options.blockMinFeeRate;
+    // Limit weight to between 4K and MAX_BLOCK_WEIGHT-4K for sanity:
+    nBlockMaxWeight = std::max<size_t>(4000, std::min<size_t>(MAX_BLOCK_WEIGHT - 4000, options.nBlockMaxWeight));
+    // Limit size to between 1K and MAX_BLOCK_SERIALIZED_SIZE-1K for sanity:
+    nBlockMaxSize = std::max<size_t>(1000, std::min<size_t>(MAX_BLOCK_SERIALIZED_SIZE - 1000, options.nBlockMaxSize));
+    // Whether we need to account for byte usage (in addition to weight usage)
+    fNeedSizeAccounting = (nBlockMaxSize < MAX_BLOCK_SERIALIZED_SIZE - 1000);
+}
+
+static BlockAssembler::Options DefaultOptions(const CChainParams& params)
 {
     // Block resource limits
     // If neither -blockmaxsize or -blockmaxweight is given, limit to DEFAULT_BLOCK_MAX_*
     // If only one is given, only restrict the specified resource.
     // If both are given, restrict both.
-    nBlockMaxWeight = DEFAULT_BLOCK_MAX_WEIGHT;
-    nBlockMaxSize = DEFAULT_BLOCK_MAX_SIZE;
+    BlockAssembler::Options options;
+    options.nBlockMaxWeight = DEFAULT_BLOCK_MAX_WEIGHT;
+    options.nBlockMaxSize = DEFAULT_BLOCK_MAX_SIZE;
     bool fWeightSet = false;
     if (IsArgSet("-blockmaxweight")) {
-        nBlockMaxWeight = GetArg("-blockmaxweight", DEFAULT_BLOCK_MAX_WEIGHT);
-        nBlockMaxSize = MAX_BLOCK_SERIALIZED_SIZE;
+        options.nBlockMaxWeight = GetArg("-blockmaxweight", DEFAULT_BLOCK_MAX_WEIGHT);
+        options.nBlockMaxSize = MAX_BLOCK_SERIALIZED_SIZE;
         fWeightSet = true;
     }
     if (IsArgSet("-blockmaxsize")) {
-        nBlockMaxSize = GetArg("-blockmaxsize", DEFAULT_BLOCK_MAX_SIZE);
+        options.nBlockMaxSize = GetArg("-blockmaxsize", DEFAULT_BLOCK_MAX_SIZE);
         if (!fWeightSet) {
-            nBlockMaxWeight = nBlockMaxSize * WITNESS_SCALE_FACTOR;
+            options.nBlockMaxWeight = options.nBlockMaxSize * WITNESS_SCALE_FACTOR;
         }
     }
-
-    // Limit weight to between 4K and MAX_BLOCK_WEIGHT-4K for sanity:
-    nBlockMaxWeight = std::max((unsigned int)4000, std::min((unsigned int)(MAX_BLOCK_WEIGHT-4000), nBlockMaxWeight));
-    // Limit size to between 1K and MAX_BLOCK_SERIALIZED_SIZE-1K for sanity:
-    nBlockMaxSize = std::max((unsigned int)1000, std::min((unsigned int)(MAX_BLOCK_SERIALIZED_SIZE-1000), nBlockMaxSize));
-
-    // Whether we need to account for byte usage (in addition to weight usage)
-    fNeedSizeAccounting = (nBlockMaxSize < MAX_BLOCK_SERIALIZED_SIZE-1000);
+    if (IsArgSet("-blockmintxfee")) {
+        CAmount n = 0;
+        ParseMoney(GetArg("-blockmintxfee", ""), n);
+        options.blockMinFeeRate = CFeeRate(n);
+    } else {
+        options.blockMinFeeRate = CFeeRate(DEFAULT_BLOCK_MIN_TX_FEE);
+    }
+    return options;
 }
+
+BlockAssembler::BlockAssembler(const CChainParams& params) : BlockAssembler(params, DefaultOptions(params)) {}
 
 void BlockAssembler::resetBlock()
 {
@@ -460,7 +477,7 @@ void BlockAssembler::addPackageTxs()
             packageSigOpsCost = modit->nSigOpCostWithAncestors;
         }
 
-        if (packageFees < ::minRelayTxFee.GetFee(packageSize)) {
+        if (packageFees < blockMinFeeRate.GetFee(packageSize)) {
             // Everything else we might consider has a lower fee rate
             return;
         }
@@ -494,7 +511,7 @@ void BlockAssembler::addPackageTxs()
         }
 
         // Package can be added. Sort the entries in a valid order.
-        vector<CTxMemPool::txiter> sortedEntries;
+        std::vector<CTxMemPool::txiter> sortedEntries;
         SortForBlock(ancestors, iter, sortedEntries);
 
         for (size_t i=0; i<sortedEntries.size(); ++i) {
@@ -523,7 +540,7 @@ void BlockAssembler::addPriorityTxs()
     fNeedSizeAccounting = true;
 
     // This vector will be sorted into a priority queue:
-    vector<TxCoinAgePriority> vecPriority;
+    std::vector<TxCoinAgePriority> vecPriority;
     TxCoinAgePriorityCompare pricomparer;
     std::map<CTxMemPool::txiter, double, CTxMemPool::CompareIteratorByHash> waitPriMap;
     typedef std::map<CTxMemPool::txiter, double, CTxMemPool::CompareIteratorByHash>::iterator waitPriIter;
