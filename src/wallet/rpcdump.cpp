@@ -1093,11 +1093,11 @@ UniValue importmulti(const JSONRPCRequest& mainRequest)
     }
 
     if (fRescan && fRunScan && requests.size()) {
-        CBlockIndex* pindex = nLowestTimestamp > minimumTimestamp ? chainActive.FindEarliestAtLeast(std::max<int64_t>(nLowestTimestamp - TIMESTAMP_WINDOW, 0)) : chainActive.Genesis();
+        CBlockIndex* pindex = nLowestTimestamp > minimumTimestamp ? chainActive.FindEarliestAtLeast(std::max<int64_t>(nLowestTimestamp - 7200, 0)) : chainActive.Genesis();
         CBlockIndex* scannedRange = nullptr;
         if (pindex) {
-            scannedRange = pwallet->ScanForWalletTransactions(pindex, true);
-            pwallet->ReacceptWalletTransactions();
+            scannedRange = pwalletMain->ScanForWalletTransactions(pindex, true);
+            pwalletMain->ReacceptWalletTransactions();
         }
 
         if (!scannedRange || scannedRange->nHeight > pindex->nHeight) {
@@ -1110,7 +1110,7 @@ UniValue importmulti(const JSONRPCRequest& mainRequest)
                 // range, or if the import result already has an error set, let
                 // the result stand unmodified. Otherwise replace the result
                 // with an error message.
-                if (GetImportTimestamp(request, now) - TIMESTAMP_WINDOW >= scannedRange->GetBlockTimeMax() || results.at(i).exists("error")) {
+                if (GetImportTimestamp(request, now) - 7200 >= scannedRange->GetBlockTimeMax() || results.at(i).exists("error")) {
                     response.push_back(results.at(i));
                 } else {
                     UniValue result = UniValue(UniValue::VOBJ);

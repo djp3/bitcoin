@@ -371,7 +371,7 @@ def stop_node(node, i):
     try:
         node.stop()
     except http.client.CannotSendRequest as e:
-        logger.exception("Unable to stop node")
+        print("WARN: Unable to stop node: " + repr(e))
     return_code = bitcoind_processes[i].wait(timeout=BITCOIND_PROC_WAIT_TIMEOUT)
     assert_equal(return_code, 0)
     del bitcoind_processes[i]
