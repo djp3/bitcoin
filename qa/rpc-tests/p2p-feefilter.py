@@ -2,13 +2,16 @@
 # Copyright (c) 2016 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-"""Test processing of feefilter messages."""
+#
 
 from test_framework.mininode import *
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
 import time
 
+'''
+FeeFilterTest -- test processing of feefilter messages
+'''
 
 def hashToHex(hash):
     return format(hash, '064x')
@@ -53,8 +56,8 @@ class FeeFilterTest(BitcoinTestFramework):
         # Node1 will be used to generate txs which should be relayed from Node0
         # to our test node
         self.nodes = []
-        self.nodes.append(start_node(0, self.options.tmpdir))
-        self.nodes.append(start_node(1, self.options.tmpdir))
+        self.nodes.append(start_node(0, self.options.tmpdir, ["-debug", "-logtimemicros"]))
+        self.nodes.append(start_node(1, self.options.tmpdir, ["-debug", "-logtimemicros"]))
         connect_nodes(self.nodes[0], 1)
 
     def run_test(self):

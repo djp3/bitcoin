@@ -13,6 +13,8 @@
 #include <boost/algorithm/string/case_conv.hpp> // for to_lower()
 #include <univalue.h>
 
+using namespace std;
+
 class CRPCConvertParam
 {
 public:
@@ -22,7 +24,7 @@ public:
 };
 
 /**
- * Specify a (method, idx, name) here if the argument is a non-string RPC
+ * Specifiy a (method, idx, name) here if the argument is a non-string RPC
  * argument and needs to be converted from JSON.
  *
  * @note Parameter indexes start from 0.
@@ -105,8 +107,11 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "keypoolrefill", 0, "newsize" },
     { "getrawmempool", 0, "verbose" },
     { "estimatefee", 0, "nblocks" },
+    { "estimatepriority", 0, "nblocks" },
     { "estimatesmartfee", 0, "nblocks" },
-    { "prioritisetransaction", 1, "fee_delta" },
+    { "estimatesmartpriority", 0, "nblocks" },
+    { "prioritisetransaction", 1, "priority_delta" },
+    { "prioritisetransaction", 2, "fee_delta" },
     { "setban", 2, "bantime" },
     { "setban", 3, "absolute" },
     { "setnetworkactive", 0, "state" },
@@ -166,7 +171,7 @@ UniValue ParseNonRFCJSONValue(const std::string& strVal)
     UniValue jVal;
     if (!jVal.read(std::string("[")+strVal+std::string("]")) ||
         !jVal.isArray() || jVal.size()!=1)
-        throw std::runtime_error(std::string("Error parsing JSON:")+strVal);
+        throw runtime_error(string("Error parsing JSON:")+strVal);
     return jVal[0];
 }
 

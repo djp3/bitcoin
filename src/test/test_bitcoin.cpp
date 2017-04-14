@@ -69,11 +69,11 @@ TestingSetup::TestingSetup(const std::string& chainName) : BasicTestingSetup(cha
         pblocktree = new CBlockTreeDB(1 << 20, true);
         pcoinsdbview = new CCoinsViewDB(1 << 23, true);
         pcoinsTip = new CCoinsViewCache(pcoinsdbview);
-        BOOST_REQUIRE(InitBlockIndex(chainparams));
+        InitBlockIndex(chainparams);
         {
             CValidationState state;
             bool ok = ActivateBestChain(state, chainparams);
-            BOOST_REQUIRE(ok);
+            BOOST_CHECK(ok);
         }
         nScriptCheckThreads = 3;
         for (int i=0; i < nScriptCheckThreads-1; i++)
@@ -141,24 +141,27 @@ TestChain100Setup::~TestChain100Setup()
 }
 
 
-CTxMemPoolEntry TestMemPoolEntryHelper::FromTx(const CMutableTransaction &tx) {
+CTxMemPoolEntry TestMemPoolEntryHelper::FromTx(const CMutableTransaction &tx, CTxMemPool *pool) {
     CTransaction txn(tx);
-    return FromTx(txn);
+    return FromTx(txn, pool);
 }
 
-CTxMemPoolEntry TestMemPoolEntryHelper::FromTx(const CTransaction &txn) {
-    return CTxMemPoolEntry(MakeTransactionRef(txn), nFee, nTime, nHeight,
-                           spendsCoinbase, sigOpCost, lp);
+CTxMemPoolEntry TestMemPoolEntryHelper::FromTx(const CTransaction &txn, CTxMemPool *pool) {
+    // Hack to assume either it's completely dependent on other mempool txs or not at all
+    CAmount inChainValue = pool && pool->HasNoInputsOf(txn) ? txn.GetValueOut() : 0;
+
+    return CTxMemPoolEntry(MakeTransactionRef(txn), nFee, nTime, dPriority, nHeight,
+                           inChainValue, spendsCoinbase, sigOpCost, lp);
 }
 
 void Shutdown(void* parg)
 {
-  exit(EXIT_SUCCESS);
+  exit(0);
 }
 
 void StartShutdown()
 {
-  exit(EXIT_SUCCESS);
+  exit(0);
 }
 
 bool ShutdownRequested()

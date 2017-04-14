@@ -18,6 +18,8 @@ def cltv_invalidate(tx):
     Prepends -1 CLTV DROP in the scriptSig itself.
     '''
     tx.vin[0].scriptSig = CScript([OP_1NEGATE, OP_CHECKLOCKTIMEVERIFY, OP_DROP] +
+                                  list(CScript(tx.vin[0].scriptSig)))
+
 '''
 This test is meant to exercise BIP65 (CHECKLOCKTIMEVERIFY)
 Connect to a single node.
@@ -31,8 +33,6 @@ Mine 1 old-version block.
 Mine 1 new version block.
 Mine 1 old version block, see that the node rejects.
 '''
-                                  list(CScript(tx.vin[0].scriptSig)))
-
 
 class BIP65Test(ComparisonTestFramework):
 

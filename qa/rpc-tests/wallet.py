@@ -2,7 +2,7 @@
 # Copyright (c) 2014-2016 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-"""Test the wallet."""
+
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
 
@@ -35,7 +35,7 @@ class WalletTest (BitcoinTestFramework):
         assert_equal(len(self.nodes[1].listunspent()), 0)
         assert_equal(len(self.nodes[2].listunspent()), 0)
 
-        self.log.info("Mining blocks...")
+        print("Mining blocks...")
 
         self.nodes[0].generate(1)
 
@@ -332,7 +332,7 @@ class WalletTest (BitcoinTestFramework):
         ]
         chainlimit = 6
         for m in maintenance:
-            self.log.info("check " + m)
+            print("check " + m)
             stop_nodes(self.nodes)
             # set lower ancestor limit for later
             self.nodes = start_nodes(3, self.options.tmpdir, [[m, "-limitancestorcount="+str(chainlimit)]] * 3)

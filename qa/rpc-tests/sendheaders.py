@@ -2,7 +2,14 @@
 # Copyright (c) 2014-2016 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-"""Test behavior of headers messages to announce blocks.
+
+from test_framework.mininode import *
+from test_framework.test_framework import BitcoinTestFramework
+from test_framework.util import *
+from test_framework.blocktools import create_block, create_coinbase
+
+'''
+SendHeadersTest -- test behavior of headers messages to announce blocks.
 
 Setup: 
 
@@ -71,13 +78,7 @@ d. Announce 49 headers that don't connect.
    Expect: getheaders message each time.
 e. Announce one more that doesn't connect.
    Expect: disconnect.
-"""
-
-from test_framework.mininode import *
-from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import *
-from test_framework.blocktools import create_block, create_coinbase
-
+'''
 
 direct_fetch_response_time = 0.05
 
@@ -229,7 +230,7 @@ class SendHeadersTest(BitcoinTestFramework):
 
     def setup_network(self):
         self.nodes = []
-        self.nodes = start_nodes(self.num_nodes, self.options.tmpdir)
+        self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, [["-debug", "-logtimemicros=1"]]*2)
         connect_nodes(self.nodes[0], 1)
 
     # mine count blocks and return the new tip
@@ -283,7 +284,7 @@ class SendHeadersTest(BitcoinTestFramework):
 
         # PART 1
         # 1. Mine a block; expect inv announcements each time
-        self.log.info("Part 1: headers don't start before sendheaders message...")
+        print("Part 1: headers don't start before sendheaders message...")
         for i in range(4):
             old_tip = tip
             tip = self.mine_blocks(1)
@@ -314,8 +315,8 @@ class SendHeadersTest(BitcoinTestFramework):
                 inv_node.clear_last_announcement()
                 test_node.clear_last_announcement()
 
-        self.log.info("Part 1: success!")
-        self.log.info("Part 2: announce blocks with headers after sendheaders message...")
+        print("Part 1: success!")
+        print("Part 2: announce blocks with headers after sendheaders message...")
         # PART 2
         # 2. Send a sendheaders message and test that headers announcements
         # commence and keep working.
@@ -376,9 +377,9 @@ class SendHeadersTest(BitcoinTestFramework):
                 height += 1
                 block_time += 1
 
-        self.log.info("Part 2: success!")
+        print("Part 2: success!")
 
-        self.log.info("Part 3: headers announcements can stop after large reorg, and resume after headers/inv from peer...")
+        print("Part 3: headers announcements can stop after large reorg, and resume after headers/inv from peer...")
 
         # PART 3.  Headers announcements can stop after large reorg, and resume after
         # getheaders or inv from peer.
@@ -440,9 +441,9 @@ class SendHeadersTest(BitcoinTestFramework):
             assert_equal(inv_node.check_last_announcement(inv=[tip]), True)
             assert_equal(test_node.check_last_announcement(headers=[tip]), True)
 
-        self.log.info("Part 3: success!")
+        print("Part 3: success!")
 
-        self.log.info("Part 4: Testing direct fetch behavior...")
+        print("Part 4: Testing direct fetch behavior...")
         tip = self.mine_blocks(1)
         height = self.nodes[0].getblockcount() + 1
         last_time = self.nodes[0].getblock(self.nodes[0].getbestblockhash())['time']
@@ -523,12 +524,12 @@ class SendHeadersTest(BitcoinTestFramework):
         with mininode_lock:
             assert_equal(test_node.last_getdata, None)
 
-        self.log.info("Part 4: success!")
+        print("Part 4: success!")
 
         # Now deliver all those blocks we announced.
         [ test_node.send_message(msg_block(x)) for x in blocks ]
 
-        self.log.info("Part 5: Testing handling of unconnecting headers")
+        print("Part 5: Testing handling of unconnecting headers")
         # First we test that receipt of an unconnecting header doesn't prevent
         # chain sync.
         for i in range(10):
@@ -595,7 +596,7 @@ class SendHeadersTest(BitcoinTestFramework):
         with mininode_lock:
             self.last_getheaders = True
 
-        self.log.info("Part 5: success!")
+        print("Part 5: success!")
 
         # Finally, check that the inv node never received a getdata request,
         # throughout the test

@@ -2,7 +2,10 @@
 # Copyright (c) 2014-2016 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-"""Test the RBF code."""
+
+#
+# Test replace by fee code
+#
 
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
@@ -25,15 +28,19 @@ def make_utxo(node, amount, confirmed=True, scriptPubKey=CScript([1])):
     fee = 1*COIN
     while node.getbalance() < satoshi_round((amount + fee)/COIN):
         node.generate(100)
+        #print (node.getbalance(), amount, fee)
 
     new_addr = node.getnewaddress()
+    #print new_addr
     txid = node.sendtoaddress(new_addr, satoshi_round((amount+fee)/COIN))
     tx1 = node.getrawtransaction(txid, 1)
     txid = int(txid, 16)
     i = None
 
     for i, txout in enumerate(tx1['vout']):
+        #print i, txout['scriptPubKey']['addresses']
         if txout['scriptPubKey']['addresses'] == [new_addr]:
+            #print i
             break
     assert i is not None
 
@@ -68,7 +75,7 @@ class ReplaceByFeeTest(BitcoinTestFramework):
 
     def setup_network(self):
         self.nodes = []
-        self.nodes.append(start_node(0, self.options.tmpdir, ["-maxorphantx=1000",
+        self.nodes.append(start_node(0, self.options.tmpdir, ["-maxorphantx=1000", "-debug",
                                                               "-whitelist=127.0.0.1",
                                                               "-limitancestorcount=50",
                                                               "-limitancestorsize=101",
@@ -80,34 +87,34 @@ class ReplaceByFeeTest(BitcoinTestFramework):
     def run_test(self):
         make_utxo(self.nodes[0], 1*COIN)
 
-        self.log.info("Running test simple doublespend...")
+        print("Running test simple doublespend...")
         self.test_simple_doublespend()
 
-        self.log.info("Running test doublespend chain...")
+        print("Running test doublespend chain...")
         self.test_doublespend_chain()
 
-        self.log.info("Running test doublespend tree...")
+        print("Running test doublespend tree...")
         self.test_doublespend_tree()
 
-        self.log.info("Running test replacement feeperkb...")
+        print("Running test replacement feeperkb...")
         self.test_replacement_feeperkb()
 
-        self.log.info("Running test spends of conflicting outputs...")
+        print("Running test spends of conflicting outputs...")
         self.test_spends_of_conflicting_outputs()
 
-        self.log.info("Running test new unconfirmed inputs...")
+        print("Running test new unconfirmed inputs...")
         self.test_new_unconfirmed_inputs()
 
-        self.log.info("Running test too many replacements...")
+        print("Running test too many replacements...")
         self.test_too_many_replacements()
 
-        self.log.info("Running test opt-in...")
+        print("Running test opt-in...")
         self.test_opt_in()
 
-        self.log.info("Running test prioritised transactions...")
+        print("Running test prioritised transactions...")
         self.test_prioritised_transactions()
 
-        self.log.info("Passed")
+        print("Passed\n")
 
     def test_simple_doublespend(self):
         """Simple doublespend"""
@@ -435,7 +442,7 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         self.nodes[0].sendrawtransaction(double_tx_hex, True)
 
     def test_opt_in(self):
-        """Replacing should only work if orig tx opted in"""
+        """ Replacing should only work if orig tx opted in """
         tx0_outpoint = make_utxo(self.nodes[0], int(1.1*COIN))
 
         # Create a non-opting in transaction
@@ -456,7 +463,7 @@ class ReplaceByFeeTest(BitcoinTestFramework):
         except JSONRPCException as exp:
             assert_equal(exp.error['code'], -26)
         else:
-            self.log.info(tx1b_txid)
+            print(tx1b_txid)
             assert(False)
 
         tx1_outpoint = make_utxo(self.nodes[0], int(1.1*COIN))
@@ -539,7 +546,7 @@ class ReplaceByFeeTest(BitcoinTestFramework):
             assert(False)
 
         # Use prioritisetransaction to set tx1a's fee to 0.
-        self.nodes[0].prioritisetransaction(tx1a_txid, int(-0.1*COIN))
+        self.nodes[0].prioritisetransaction(tx1a_txid, 0, int(-0.1*COIN))
 
         # Now tx1b should be able to replace tx1a
         tx1b_txid = self.nodes[0].sendrawtransaction(tx1b_hex, True)
@@ -571,7 +578,7 @@ class ReplaceByFeeTest(BitcoinTestFramework):
             assert(False)
 
         # Now prioritise tx2b to have a higher modified fee
-        self.nodes[0].prioritisetransaction(tx2b.hash, int(0.1*COIN))
+        self.nodes[0].prioritisetransaction(tx2b.hash, 0, int(0.1*COIN))
 
         # tx2b should now be accepted
         tx2b_txid = self.nodes[0].sendrawtransaction(tx2b_hex, True)
