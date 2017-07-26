@@ -2,20 +2,18 @@
 # Copyright (c) 2017 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-
-from test_framework.mininode import *
-from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import *
-
-'''
-Test for message sending before handshake completion
+"""Test message sending before handshake completion.
 
 A node should never send anything other than VERSION/VERACK/REJECT until it's
 received a VERACK.
 
 This test connects to a node and sends it a few messages, trying to intice it
 into sending us something it shouldn't.
-'''
+"""
+
+from test_framework.mininode import *
+from test_framework.test_framework import BitcoinTestFramework
+from test_framework.util import *
 
 banscore = 10
 
@@ -27,7 +25,7 @@ class CLazyNode(NodeConnCB):
 
     def bad_message(self, message):
         self.unexpected_msg = True
-        print("should not have received message: %s" % message.command)
+        self.log.info("should not have received message: %s" % message.command)
 
     def on_open(self, conn):
         self.connected = True

@@ -106,6 +106,7 @@ def bctest(testDir, testObj, buildenv):
         raise
 
     if outputData:
+        data_mismatch, formatting_mismatch = False, False
         # Parse command output and expected output
         try:
             a_parsed = parse_output(outs[0], outputType)
@@ -120,7 +121,7 @@ def bctest(testDir, testObj, buildenv):
         # Compare data
         if a_parsed != b_parsed:
             logging.error("Output data mismatch for " + outputFn + " (format " + outputType + ")")
-            raise Exception
+            data_mismatch = True
         # Compare formatting
         if outs[0] != outputData:
             error_message = "Output formatting mismatch for " + outputFn + ":\n"
@@ -129,7 +130,9 @@ def bctest(testDir, testObj, buildenv):
                                                           fromfile=outputFn,
                                                           tofile="returned"))
             logging.error(error_message)
-            raise Exception
+            formatting_mismatch = True
+
+        assert not data_mismatch and not formatting_mismatch
 
     # Compare the return code to the expected return code
     wantRC = 0

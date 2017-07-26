@@ -1666,7 +1666,7 @@
 <context>
     <name>PaymentServer</name>
     <message>
-        <location filename="../paymentserver.cpp" line="+326"/>
+        <location filename="../paymentserver.cpp" line="+328"/>
         <location line="+216"/>
         <location line="+42"/>
         <location line="+113"/>

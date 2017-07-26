@@ -2,6 +2,7 @@
 # Copyright (c) 2014-2016 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
+"""Test the abandontransaction RPC.
 
  The abandontransaction RPC marks a transaction and all its in-wallet
  descendants as abandoned which allows their inputs to be respent. It can be
@@ -151,9 +152,9 @@ class AbandonConflictTest(BitcoinTestFramework):
         self.nodes[0].invalidateblock(self.nodes[0].getbestblockhash())
         newbalance = self.nodes[0].getbalance()
         #assert_equal(newbalance, balance - Decimal("10"))
-        print("If balance has not declined after invalidateblock then out of mempool wallet tx which is no longer")
-        print("conflicted has not resumed causing its inputs to be seen as spent.  See Issue #7315")
-        print(str(balance) + " -> " + str(newbalance) + " ?")
+        self.log.info("If balance has not declined after invalidateblock then out of mempool wallet tx which is no longer")
+        self.log.info("conflicted has not resumed causing its inputs to be seen as spent.  See Issue #7315")
+        self.log.info(str(balance) + " -> " + str(newbalance) + " ?")
 
 if __name__ == '__main__':
     AbandonConflictTest().main()

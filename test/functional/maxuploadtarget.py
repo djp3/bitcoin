@@ -2,14 +2,7 @@
 # Copyright (c) 2015-2016 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-
-from test_framework.mininode import *
-from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import *
-import time
-
-'''
-Test behavior of -maxuploadtarget.
+"""Test behavior of -maxuploadtarget.
 
 * Verify that getdata requests for old blocks (>1week) are dropped
 if uploadtarget has been reached.
@@ -116,7 +109,7 @@ class MaxUploadTest(BitcoinTestFramework):
             test_nodes[0].send_message(getdata_request)
         test_nodes[0].wait_for_disconnect()
         assert_equal(len(self.nodes[0].getpeerinfo()), 2)
-        print("Peer 0 disconnected after downloading old block too many times")
+        self.log.info("Peer 0 disconnected after downloading old block too many times")
 
         # Requesting the current block on test_nodes[1] should succeed indefinitely,
         # even when over the max upload target.
@@ -127,7 +120,7 @@ class MaxUploadTest(BitcoinTestFramework):
             test_nodes[1].sync_with_ping()
             assert_equal(test_nodes[1].block_receive_map[big_new_block], i+1)
 
-        print("Peer 1 able to repeatedly download new block")
+        self.log.info("Peer 1 able to repeatedly download new block")
 
         # But if test_nodes[1] tries for an old block, it gets disconnected too.
         getdata_request.inv = [CInv(2, big_old_block)]
@@ -135,9 +128,9 @@ class MaxUploadTest(BitcoinTestFramework):
         test_nodes[1].wait_for_disconnect()
         assert_equal(len(self.nodes[0].getpeerinfo()), 1)
 
-        print("Peer 1 disconnected after trying to download old block")
+        self.log.info("Peer 1 disconnected after trying to download old block")
 
-        print("Advancing system time on node to clear counters...")
+        self.log.info("Advancing system time on node to clear counters...")
 
         # If we advance the time by 24 hours, then the counters should reset,
         # and test_nodes[2] should be able to retrieve the old block.
@@ -147,7 +140,7 @@ class MaxUploadTest(BitcoinTestFramework):
         test_nodes[2].sync_with_ping()
         assert_equal(test_nodes[2].block_receive_map[big_old_block], 1)
 
-        print("Peer 2 able to download old block")
+        self.log.info("Peer 2 able to download old block")
 
         [c.disconnect_node() for c in connections]
 

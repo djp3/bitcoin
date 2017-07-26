@@ -2,6 +2,7 @@
 # Copyright (c) 2016 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
+"""Test Hierarchical Deterministic wallet function."""
 
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
@@ -69,7 +70,7 @@ class WalletHDTest(BitcoinTestFramework):
         self.sync_all()
         assert_equal(self.nodes[1].getbalance(), num_hd_adds + 1)
 
-        print("Restore backup ...")
+        self.log.info("Restore backup ...")
         self.stop_node(1)
         os.remove(self.options.tmpdir + "/node1/regtest/wallet.dat")
         shutil.copyfile(tmpdir + "/hd.bak", tmpdir + "/node1/regtest/wallet.dat")

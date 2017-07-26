@@ -2,15 +2,10 @@
 # Copyright (c) 2014-2016 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-
-#
-# Test BIP68 implementation
-#
+"""Test BIP68 implementation."""
 
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
-from test_framework.script import *
-from test_framework.mininode import *
 from test_framework.blocktools import *
 
 SEQUENCE_LOCKTIME_DISABLE_FLAG = (1<<31)
@@ -34,28 +29,26 @@ class BIP68Test(BitcoinTestFramework):
         # Generate some coins
         self.nodes[0].generate(110)
 
-        print("Running test disable flag")
+        self.log.info("Running test disable flag")
         self.test_disable_flag()
 
-        print("Running test sequence-lock-confirmed-inputs")
+        self.log.info("Running test sequence-lock-confirmed-inputs")
         self.test_sequence_lock_confirmed_inputs()
 
-        print("Running test sequence-lock-unconfirmed-inputs")
+        self.log.info("Running test sequence-lock-unconfirmed-inputs")
         self.test_sequence_lock_unconfirmed_inputs()
 
-        print("Running test BIP68 not consensus before versionbits activation")
+        self.log.info("Running test BIP68 not consensus before versionbits activation")
         self.test_bip68_not_consensus()
 
-        print("Verifying nVersion=2 transactions aren't standard")
-        self.test_version2_relay(before_activation=True)
-
-        print("Activating BIP68 (and 112/113)")
+        self.log.info("Activating BIP68 (and 112/113)")
         self.activateCSV()
 
-        print("Verifying nVersion=2 transactions are now standard")
-        self.test_version2_relay(before_activation=False)
+        self.log.info("Verifying nVersion=2 transactions are standard.")
+        self.log.info("Note that nVersion=2 transactions are always standard (independent of BIP68 activation status).")
+        self.test_version2_relay()
 
-        print("Passed\n")
+        self.log.info("Passed")
 
     # Test that BIP68 is not in effect if tx version is 1, or if
     # the first sequence bit is set.
@@ -385,8 +378,8 @@ class BIP68Test(BitcoinTestFramework):
         assert(get_bip9_status(self.nodes[0], 'csv')['status'] == 'active')
         sync_blocks(self.nodes)
 
-    # Use self.nodes[1] to test standardness relay policy
-    def test_version2_relay(self, before_activation):
+    # Use self.nodes[1] to test that version 2 transactions are standard.
+    def test_version2_relay(self):
         inputs = [ ]
         outputs = { self.nodes[1].getnewaddress() : 1.0 }
         rawtx = self.nodes[1].createrawtransaction(inputs, outputs)
@@ -394,12 +387,7 @@ class BIP68Test(BitcoinTestFramework):
         tx = FromHex(CTransaction(), rawtxfund)
         tx.nVersion = 2
         tx_signed = self.nodes[1].signrawtransaction(ToHex(tx))["hex"]
-        try:
-            tx_id = self.nodes[1].sendrawtransaction(tx_signed)
-            assert(before_activation == False)
-        except:
-            assert(before_activation)
-
+        tx_id = self.nodes[1].sendrawtransaction(tx_signed)
 
 if __name__ == '__main__':
     BIP68Test().main()

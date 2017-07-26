@@ -196,15 +196,15 @@ void GetDevURandom(unsigned char *ent32)
 #endif
 
 /** Get 32 bytes of system entropy. */
-static void GetOSRand(unsigned char *ent32)
+void GetOSRand(unsigned char *ent32)
 {
-#ifdef WIN32
+#if defined(WIN32)
     HCRYPTPROV hProvider;
     int ret = CryptAcquireContextW(&hProvider, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT);
     if (!ret) {
         RandFailure();
     }
-    ret = CryptGenRandom(hProvider, 32, ent32);
+    ret = CryptGenRandom(hProvider, NUM_OS_RANDOM_BYTES, ent32);
     if (!ret) {
         RandFailure();
     }
@@ -237,15 +237,24 @@ static void GetOSRand(unsigned char *ent32)
     if (getentropy(ent32, NUM_OS_RANDOM_BYTES) != 0) {
         RandFailure();
     }
+#elif defined(HAVE_SYSCTL_ARND)
+    /* FreeBSD and similar. It is possible for the call to return less
+     * bytes than requested, so need to read in a loop.
+     */
+    static const int name[2] = {CTL_KERN, KERN_ARND};
     int have = 0;
     do {
-        ssize_t n = read(f, ent32 + have, 32 - have);
-        if (n <= 0 || n + have > 32) {
+        size_t len = NUM_OS_RANDOM_BYTES - have;
+        if (sysctl(name, ARRAYLEN(name), ent32 + have, &len, NULL, 0) != 0) {
             RandFailure();
         }
-        have += n;
-    } while (have < 32);
-    close(f);
+        have += len;
+    } while (have < NUM_OS_RANDOM_BYTES);
+#else
+    /* Fall back to /dev/urandom if there is no specific method implemented to
+     * get system entropy for this OS.
+     */
+    GetDevURandom(ent32);
 #endif
 }
 

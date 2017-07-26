@@ -5,8 +5,7 @@
 """Run regression test suite.
 
 This module calls down into individual test cases via subprocess. It will
-forward all unrecognized arguments onto the individual test scripts, other
-than:
+forward all unrecognized arguments onto the individual test scripts.
 
 Functional tests are disabled on Windows by default. Use --force to run them anyway.
 
@@ -52,77 +51,9 @@ if os.name == 'posix':
 TEST_EXIT_PASSED = 0
 TEST_EXIT_SKIPPED = 77
 
-sys.path.append("qa/pull-tester/")
-from tests_config import *
-
-BOLD = ("","")
-if os.name == 'posix':
-    # primitive formatting on supported
-    # terminal via ANSI escape sequences:
-    BOLD = ('\033[0m', '\033[1m')
-
-RPC_TESTS_DIR = SRCDIR + '/qa/rpc-tests/'
-
-#If imported values are not defined then set to zero (or disabled)
-if 'ENABLE_WALLET' not in vars():
-    ENABLE_WALLET=0
-if 'ENABLE_BITCOIND' not in vars():
-    ENABLE_BITCOIND=0
-if 'ENABLE_UTILS' not in vars():
-    ENABLE_UTILS=0
-if 'ENABLE_ZMQ' not in vars():
-    ENABLE_ZMQ=0
-
-ENABLE_COVERAGE=0
-
-#Create a set to store arguments and create the passon string
-opts = set()
-passon_args = []
-PASSON_REGEX = re.compile("^--")
-PARALLEL_REGEX = re.compile('^-parallel=')
-
-print_help = False
-run_parallel = 4
-
-for arg in sys.argv[1:]:
-    if arg == "--help" or arg == "-h" or arg == "-?":
-        print_help = True
-        break
-    if arg == '--coverage':
-        ENABLE_COVERAGE = 1
-    elif PASSON_REGEX.match(arg):
-        passon_args.append(arg)
-    elif PARALLEL_REGEX.match(arg):
-        run_parallel = int(arg.split(sep='=', maxsplit=1)[1])
-    else:
-        opts.add(arg)
-
-#Set env vars
-if "BITCOIND" not in os.environ:
-    os.environ["BITCOIND"] = BUILDDIR + '/src/bitcoind' + EXEEXT
-
-if EXEEXT == ".exe" and "-win" not in opts:
-    # https://github.com/bitcoin/bitcoin/commit/d52802551752140cf41f0d9a225a43e84404d3e9
-    # https://github.com/bitcoin/bitcoin/pull/5677#issuecomment-136646964
-    print("Win tests currently disabled by default.  Use -win option to enable")
-    sys.exit(0)
-
-if not (ENABLE_WALLET == 1 and ENABLE_UTILS == 1 and ENABLE_BITCOIND == 1):
-    print("No rpc tests to run. Wallet, utils, and bitcoind must all be enabled")
-    sys.exit(0)
-
-# python3-zmq may not be installed. Handle this gracefully and with some helpful info
-if ENABLE_ZMQ:
-    try:
-        import zmq
-    except ImportError:
-        print("ERROR: \"import zmq\" failed. Set ENABLE_ZMQ=0 or "
-              "to run zmq tests, see dependency info in /qa/README.md.")
-        # ENABLE_ZMQ=0
-        raise
-
-testScripts = [
-    # longest test should go first, to favor running tests in parallel
+BASE_SCRIPTS= [
+    # Scripts that are run by the travis build process.
+    # Longest test should go first, to favor running tests in parallel
     'wallet-hd.py',
     'walletbackup.py',
     # vv Tests less than 5m vv
@@ -186,8 +117,6 @@ testScripts = [
     'wallet-encryption.py',
     'uptime.py',
 ]
-if ENABLE_ZMQ:
-    testScripts.append('zmq_test.py')
 
 EXTENDED_SCRIPTS = [
     # These tests are not run by the travis build process.
@@ -363,7 +292,7 @@ def run_tests(test_list, src_dir, build_dir, exeext, tmpdir, jobs=1, enable_cove
     else:
         coverage = None
 
-    if len(test_list) > 1 and run_parallel > 1:
+    if len(test_list) > 1 and jobs > 1:
         # Populate cache
         subprocess.check_output([tests_dir + 'create_cache.py'] + flags + ["--tmpdir=%s/cache" % tmpdir])
 
@@ -569,7 +498,7 @@ class RPCCoverage(object):
         reference_filename = 'rpc_interface.txt'
         coverage_file_prefix = 'coverage.'
 
-        coverage_ref_filename = os.path.join(self.dir, REFERENCE_FILENAME)
+        coverage_ref_filename = os.path.join(self.dir, reference_filename)
         coverage_filenames = set()
         all_cmds = set()
         covered_cmds = set()
@@ -582,7 +511,7 @@ class RPCCoverage(object):
 
         for root, dirs, files in os.walk(self.dir):
             for filename in files:
-                if filename.startswith(COVERAGE_FILE_PREFIX):
+                if filename.startswith(coverage_file_prefix):
                     coverage_filenames.add(os.path.join(root, filename))
 
         for filename in coverage_filenames:
@@ -593,4 +522,4 @@ class RPCCoverage(object):
 
 
 if __name__ == '__main__':
-    runtests()
+    main()

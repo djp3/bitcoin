@@ -18,6 +18,7 @@ from __future__ import division,print_function,unicode_literals
 import os
 from sys import stdin,stdout,stderr
 import argparse
+import hashlib
 import subprocess
 import json,codecs
 try:
@@ -219,6 +220,9 @@ def main():
     subprocess.check_call([GIT,'checkout','-q','-b',local_merge_branch])
 
     try:
+        # Go up to the repository's root.
+        toplevel = subprocess.check_output([GIT,'rev-parse','--show-toplevel']).strip()
+        os.chdir(toplevel)
         # Create unsigned merge commit.
         if title:
             firstline = 'Merge #%s: %s' % (pull,title)
@@ -259,11 +263,9 @@ def main():
 
         print_merge_details(pull, title, branch, base_branch, head_branch)
         print()
+
         # Run test command if configured.
         if testcmd:
-            # Go up to the repository's root.
-            toplevel = subprocess.check_output([GIT,'rev-parse','--show-toplevel']).strip()
-            os.chdir(toplevel)
             if subprocess.call(testcmd,shell=True):
                 print("ERROR: Running %s failed." % testcmd,file=stderr)
                 exit(5)
@@ -286,6 +288,11 @@ def main():
             if os.path.isfile('/etc/debian_version'): # Show pull number on Debian default prompt
                 os.putenv('debian_chroot',pull)
             subprocess.call([BASH,'-i'])
+
+        second_sha512 = tree_sha512sum()
+        if first_sha512 != second_sha512:
+            print("ERROR: Tree hash changed unexpectedly",file=stderr)
+            exit(8)
 
         # Sign the merge commit.
         print_merge_details(pull, title, branch, base_branch, head_branch)

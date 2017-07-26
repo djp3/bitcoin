@@ -149,14 +149,10 @@ template<typename T, typename... Args> static inline void MarkUsed(const T& t, c
 
 #define LogPrint(category, ...) do { \
     if (LogAcceptCategory((category))) { \
-        LogPrintStr(tfm::format(__VA_ARGS__)); \
+        LogPrintf(__VA_ARGS__); \
     } \
 } while(0)
 #endif
-
-#define LogPrintf(...) do { \
-    LogPrintStr(tfm::format(__VA_ARGS__)); \
-} while(0)
 
 template<typename... Args>
 bool error(const char* fmt, const Args&... args)

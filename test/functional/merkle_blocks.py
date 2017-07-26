@@ -2,10 +2,7 @@
 # Copyright (c) 2014-2016 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-
-#
-# Test merkleblock fetch/validation
-#
+"""Test gettxoutproof and verifytxoutproof RPCs."""
 
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import *
@@ -28,7 +25,7 @@ class MerkleBlockTest(BitcoinTestFramework):
         self.sync_all()
 
     def run_test(self):
-        print("Mining blocks...")
+        self.log.info("Mining blocks...")
         self.nodes[0].generate(105)
         self.sync_all()
 
