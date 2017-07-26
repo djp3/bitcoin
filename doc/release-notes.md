@@ -30,51 +30,6 @@ frequently tested on them.
 Notable changes
 ===============
 
-RPC changes
------------
-
-- The first positional argument of `createrawtransaction` was renamed from
-  `transactions` to `inputs`.
-
-- The argument of `disconnectnode` was renamed from `node` to `address`.
-
-These interface changes break compatibility with 0.14.0, when the named
-arguments functionality, introduced in 0.14.0, is used. Client software
-using these calls with named arguments needs to be updated.
-
-Mining
-------
-
-Getblocktemplate sets the segwit version bit even when the downstream
-client has not been updated to include the segwit commitment.  Ability
-to enforce the rule is the only required criteria for safe activation,
-but previously signaling was only requested if the miner could include
-transactions in order to avoid a potential outcome where segwit would
-activate at a time when no segwit transactions could be included.
-Since many miners are now including the segwit commitment this concern
-no longer applies.
-
-UTXO memory accounting
-----------------------
-
-Memory usage for the UTXO cache is being calculated more accurately, so that
-the configured limit (`-dbcache`) will be respected when memory usage peaks
-during cache flushes.  The memory accounting in prior releases is estimated to
-only account for half the actual peak utilization.
-
-The default `-dbcache` has also been changed in this release to 450MiB.  Users
-who currently set `-dbcache` to a high value (e.g. to keep the UTXO more fully
-cached in memory) should consider increasing this setting in order to achieve
-the same cache performance as prior releases.  Users on low-memory systems
-(such as systems with 1GB or less) should consider specifying a lower value for
-this parameter.
-
-Additional information relating to running on low-memory systems can be found
-here:
-[reducing-bitcoind-memory-usage.md](https://gist.github.com/laanwj/efe29c7661ce9b6620a7).
-
-0.14.1 Change log
-=================
 
 Detailed release notes follow. This overview includes changes that affect
 behavior, not code moves, refactors and string updates. For convenience in locating
@@ -114,6 +69,70 @@ git merge commit are mentioned.
 - #10037 `4d8e660` Trivial: Fix typo in help getrawtransaction RPC (keystrike)
 - #10120 `e4c9a90` util: Work around (virtual) memory exhaustion on 32-bit w/ glibc (laanwj)
 - #10130 `ecc5232` bitcoin-tx input verification (awemany, jnewbery)
+=======
+Low-level RPC changes
+---------------------
+
+- The new database model no longer stores information about transaction
+  versions of unspent outputs. This means that:
+  - The `gettxout` RPC no longer has a `version` field in the response.
+  - The `gettxoutsetinfo` RPC reports `hash_serialized_2` instead of `hash_serialized`,
+    which does not commit to the transaction versions of unspent outputs, but does
+    commit to the height and coinbase information.
+  - The `gettxoutsetinfo` response now contains `disk_size` and `bogosize` instead of
+    `bytes_serialized`. The first is a more accurate estimate of actual disk usage, but
+    is not deterministic. The second is unrelated to disk usage, but is a
+    database-independent metric of UTXO set size: it counts every UTXO entry as 50 + the
+    length of its scriptPubKey.
+  - The `getutxos` REST path no longer reports the `txvers` field in JSON format,
+    and always reports 0 for transaction versions in the binary format
+
+
+- Error codes have been updated to be more accurate for the following error cases:
+  - `getblock` now returns RPC_MISC_ERROR if the block can't be found on disk (for
+  example if the block has been pruned). Previously returned RPC_INTERNAL_ERROR.
+  - `pruneblockchain` now returns RPC_MISC_ERROR if the blocks cannot be pruned
+  because the node is not in pruned mode. Previously returned RPC_METHOD_NOT_FOUND.
+  - `pruneblockchain` now returns RPC_INVALID_PARAMETER if the blocks cannot be pruned
+  because the supplied timestamp is too late. Previously returned RPC_INTERNAL_ERROR.
+  - `pruneblockchain` now returns RPC_MISC_ERROR if the blocks cannot be pruned
+  because the blockchain is too short. Previously returned RPC_INTERNAL_ERROR.
+  - `setban` now returns RPC_CLIENT_INVALID_IP_OR_SUBNET if the supplied IP address
+  or subnet is invalid. Previously returned RPC_CLIENT_NODE_ALREADY_ADDED.
+  - `setban` now returns RPC_CLIENT_INVALID_IP_OR_SUBNET if the user tries to unban
+  a node that has not previously been banned. Previously returned RPC_MISC_ERROR.
+  - `removeprunedfunds` now returns RPC_WALLET_ERROR if bitcoind is unable to remove
+  the transaction. Previously returned RPC_INTERNAL_ERROR.
+  - `removeprunedfunds` now returns RPC_INVALID_PARAMETER if the transaction does not
+  exist in the wallet. Previously returned RPC_INTERNAL_ERROR.
+  - `fundrawtransaction` now returns RPC_INVALID_ADDRESS_OR_KEY if an invalid change
+  address is provided. Previously returned RPC_INVALID_PARAMETER.
+  - `fundrawtransaction` now returns RPC_WALLET_ERROR if bitcoind is unable to create
+  the transaction. The error message provides further details. Previously returned
+  RPC_INTERNAL_ERROR.
+  - `bumpfee` now returns RPC_INVALID_PARAMETER if the provided transaction has
+  descendants in the wallet. Previously returned RPC_MISC_ERROR.
+  - `bumpfee` now returns RPC_INVALID_PARAMETER if the provided transaction has
+  descendants in the mempool. Previously returned RPC_MISC_ERROR.
+  - `bumpfee` now returns RPC_WALLET_ERROR if the provided transaction has
+  has been mined or conflicts with a mined transaction. Previously returned
+  RPC_INVALID_ADDRESS_OR_KEY.
+  - `bumpfee` now returns RPC_WALLET_ERROR if the provided transaction is not
+  BIP 125 replaceable. Previously returned RPC_INVALID_ADDRESS_OR_KEY.
+  - `bumpfee` now returns RPC_WALLET_ERROR if the provided transaction has already
+  been bumped by a different transaction. Previously returned RPC_INVALID_REQUEST.
+  - `bumpfee` now returns RPC_WALLET_ERROR if the provided transaction contains
+  inputs which don't belong to this wallet. Previously returned RPC_INVALID_ADDRESS_OR_KEY.
+  - `bumpfee` now returns RPC_WALLET_ERROR if the provided transaction has multiple change
+  outputs. Previously returned RPC_MISC_ERROR.
+  - `bumpfee` now returns RPC_WALLET_ERROR if the provided transaction has no change
+  output. Previously returned RPC_MISC_ERROR.
+  - `bumpfee` now returns RPC_WALLET_ERROR if the fee is too high. Previously returned
+  RPC_MISC_ERROR.
+  - `bumpfee` now returns RPC_WALLET_ERROR if the fee is too low. Previously returned
+  RPC_MISC_ERROR.
+  - `bumpfee` now returns RPC_WALLET_ERROR if the change output is too small to bump the
+  fee. Previously returned RPC_MISC_ERROR.
 
 Credits
 =======

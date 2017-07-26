@@ -12,7 +12,6 @@
 #include "script/standard.h"
 #include "uint256.h"
 
-#include <boost/foreach.hpp>
 
 using namespace std;
 
@@ -128,7 +127,7 @@ static bool SignStep(const BaseSignatureCreator& creator, const CScript& scriptP
 static CScript PushAll(const vector<valtype>& values)
 {
     CScript result;
-    BOOST_FOREACH(const valtype& v, values) {
+    for (const valtype& v : values) {
         if (v.size() == 0) {
             result << OP_0;
         } else if (v.size() == 1 && v[0] >= 1 && v[0] <= 16) {
@@ -143,10 +142,9 @@ static CScript PushAll(const vector<valtype>& values)
 bool ProduceSignature(const BaseSignatureCreator& creator, const CScript& fromPubKey, SignatureData& sigdata)
 {
     CScript script = fromPubKey;
-    bool solved = true;
     std::vector<valtype> result;
     txnouttype whichType;
-    solved = SignStep(creator, script, result, whichType, SIGVERSION_BASE);
+    bool solved = SignStep(creator, script, result, whichType, SIGVERSION_BASE);
     bool P2SH = false;
     CScript subscript;
     sigdata.scriptWitness.stack.clear();
@@ -233,13 +231,13 @@ static vector<valtype> CombineMultisig(const CScript& scriptPubKey, const BaseSi
                                const vector<valtype>& sigs1, const vector<valtype>& sigs2, SigVersion sigversion)
 {
     // Combine all the signatures we've got:
-    set<valtype> allsigs;
-    BOOST_FOREACH(const valtype& v, sigs1)
+    std::set<valtype> allsigs;
+    for (const valtype& v : sigs1)
     {
         if (!v.empty())
             allsigs.insert(v);
     }
-    BOOST_FOREACH(const valtype& v, sigs2)
+    for (const valtype& v : sigs2)
     {
         if (!v.empty())
             allsigs.insert(v);
@@ -249,8 +247,8 @@ static vector<valtype> CombineMultisig(const CScript& scriptPubKey, const BaseSi
     assert(vSolutions.size() > 1);
     unsigned int nSigsRequired = vSolutions.front()[0];
     unsigned int nPubKeys = vSolutions.size()-2;
-    map<valtype, valtype> sigs;
-    BOOST_FOREACH(const valtype& sig, allsigs)
+    std::map<valtype, valtype> sigs;
+    for (const valtype& sig : allsigs)
     {
         for (unsigned int i = 0; i < nPubKeys; i++)
         {
@@ -396,13 +394,13 @@ class DummySignatureChecker : public BaseSignatureChecker
 public:
     DummySignatureChecker() {}
 
-    bool CheckSig(const std::vector<unsigned char>& scriptSig, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const
+    bool CheckSig(const std::vector<unsigned char>& scriptSig, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const override
     {
         return true;
     }
 };
 const DummySignatureChecker dummyChecker;
-}
+} // namespace
 
 const BaseSignatureChecker& DummySignatureCreator::Checker() const
 {

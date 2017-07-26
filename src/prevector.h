@@ -131,7 +131,7 @@ public:
         typedef const T* pointer;
         typedef const T& reference;
         typedef std::bidirectional_iterator_tag iterator_category;
-        const_reverse_iterator(T* ptr_) : ptr(ptr_) {}
+        const_reverse_iterator(const T* ptr_) : ptr(ptr_) {}
         const_reverse_iterator(reverse_iterator x) : ptr(&(*x)) {}
         const T& operator*() const { return *ptr; }
         const T* operator->() const { return ptr; }
@@ -219,7 +219,7 @@ public:
         }
     }
 
-    prevector() : _size(0) {}
+    prevector() : _size(0), _union{{}} {}
 
     explicit prevector(size_type n) : _size(0) {
         resize(n);
@@ -386,6 +386,12 @@ public:
     }
 
     iterator erase(iterator first, iterator last) {
+        // Erase is not allowed to the change the object's capacity. That means
+        // that when starting with an indirectly allocated prevector with
+        // size and capacity > N, the result may be a still indirectly allocated
+        // prevector with size <= N and capacity > N. A shrink_to_fit() call is
+        // necessary to switch to the (more efficient) directly allocated
+        // representation (with capacity N and size <= N).
         iterator p = first;
         char* endp = (char*)&(*end());
         while (p != last) {
