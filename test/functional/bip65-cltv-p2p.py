@@ -60,23 +60,18 @@ def create_transaction(node, coinbase, to_address, amount):
     return tx
 
 class BIP65Test(BitcoinTestFramework):
-
-    def __init__(self):
-        super().__init__()
+    def set_test_params(self):
         self.num_nodes = 1
         self.extra_args = [['-promiscuousmempoolflags=1', '-whitelist=127.0.0.1']]
         self.setup_clean_chain = True
 
     def run_test(self):
-        node0 = NodeConnCB()
-        connections = []
-        connections.append(NodeConn('127.0.0.1', p2p_port(0), self.nodes[0], node0))
-        node0.add_connection(connections[0])
+        self.nodes[0].add_p2p_connection(P2PInterface())
 
-        NetworkThread().start() # Start up network handling in another thread
+        network_thread_start()
 
         # wait_for_verack ensures that the P2P connection is fully up.
-        node0.wait_for_verack()
+        self.nodes[0].p2p.wait_for_verack()
 
         self.log.info("Mining %d blocks", CLTV_HEIGHT - 2)
         self.coinbase_blocks = self.nodes[0].generate(CLTV_HEIGHT - 2)
@@ -97,7 +92,7 @@ class BIP65Test(BitcoinTestFramework):
         block.hashMerkleRoot = block.calc_merkle_root()
         block.solve()
 
-        node0.send_and_ping(msg_block(block))
+        self.nodes[0].p2p.send_and_ping(msg_block(block))
         assert_equal(self.nodes[0].getbestblockhash(), block.hash)
 
         self.log.info("Test that blocks must now be at least version 4")
@@ -106,15 +101,15 @@ class BIP65Test(BitcoinTestFramework):
         block = create_block(tip, create_coinbase(CLTV_HEIGHT), block_time)
         block.nVersion = 3
         block.solve()
-        node0.send_and_ping(msg_block(block))
+        self.nodes[0].p2p.send_and_ping(msg_block(block))
         assert_equal(int(self.nodes[0].getbestblockhash(), 16), tip)
 
-        wait_until(lambda: "reject" in node0.last_message.keys(), lock=mininode_lock)
+        wait_until(lambda: "reject" in self.nodes[0].p2p.last_message.keys(), lock=mininode_lock)
         with mininode_lock:
-            assert_equal(node0.last_message["reject"].code, REJECT_OBSOLETE)
-            assert_equal(node0.last_message["reject"].reason, b'bad-version(0x00000003)')
-            assert_equal(node0.last_message["reject"].data, block.sha256)
-            del node0.last_message["reject"]
+            assert_equal(self.nodes[0].p2p.last_message["reject"].code, REJECT_OBSOLETE)
+            assert_equal(self.nodes[0].p2p.last_message["reject"].reason, b'bad-version(0x00000003)')
+            assert_equal(self.nodes[0].p2p.last_message["reject"].data, block.sha256)
+            del self.nodes[0].p2p.last_message["reject"]
 
         self.log.info("Test that invalid-according-to-cltv transactions cannot appear in a block")
         block.nVersion = 4
@@ -127,7 +122,7 @@ class BIP65Test(BitcoinTestFramework):
         # First we show that this tx is valid except for CLTV by getting it
         # accepted to the mempool (which we can achieve with
         # -promiscuousmempoolflags).
-        node0.send_and_ping(msg_tx(spendtx))
+        self.nodes[0].p2p.send_and_ping(msg_tx(spendtx))
         assert spendtx.hash in self.nodes[0].getrawmempool()
 
         # Now we verify that a block with this transaction is invalid.
@@ -135,18 +130,18 @@ class BIP65Test(BitcoinTestFramework):
         block.hashMerkleRoot = block.calc_merkle_root()
         block.solve()
 
-        node0.send_and_ping(msg_block(block))
+        self.nodes[0].p2p.send_and_ping(msg_block(block))
         assert_equal(int(self.nodes[0].getbestblockhash(), 16), tip)
 
-        wait_until(lambda: "reject" in node0.last_message.keys(), lock=mininode_lock)
+        wait_until(lambda: "reject" in self.nodes[0].p2p.last_message.keys(), lock=mininode_lock)
         with mininode_lock:
-            assert node0.last_message["reject"].code in [REJECT_INVALID, REJECT_NONSTANDARD]
-            assert_equal(node0.last_message["reject"].data, block.sha256)
-            if node0.last_message["reject"].code == REJECT_INVALID:
+            assert self.nodes[0].p2p.last_message["reject"].code in [REJECT_INVALID, REJECT_NONSTANDARD]
+            assert_equal(self.nodes[0].p2p.last_message["reject"].data, block.sha256)
+            if self.nodes[0].p2p.last_message["reject"].code == REJECT_INVALID:
                 # Generic rejection when a block is invalid
-                assert_equal(node0.last_message["reject"].reason, b'block-validation-failed')
+                assert_equal(self.nodes[0].p2p.last_message["reject"].reason, b'block-validation-failed')
             else:
-                assert b'Negative locktime' in node0.last_message["reject"].reason
+                assert b'Negative locktime' in self.nodes[0].p2p.last_message["reject"].reason
 
         self.log.info("Test that a version 4 block with a valid-according-to-CLTV transaction is accepted")
         spendtx = cltv_validate(self.nodes[0], spendtx, CLTV_HEIGHT - 1)
@@ -157,7 +152,7 @@ class BIP65Test(BitcoinTestFramework):
         block.hashMerkleRoot = block.calc_merkle_root()
         block.solve()
 
-        node0.send_and_ping(msg_block(block))
+        self.nodes[0].p2p.send_and_ping(msg_block(block))
         assert_equal(int(self.nodes[0].getbestblockhash(), 16), block.sha256)
 
 

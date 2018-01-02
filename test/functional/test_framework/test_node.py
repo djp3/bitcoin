@@ -4,19 +4,25 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Class for bitcoind node under test"""
 
+import decimal
 import errno
 import http.client
+import json
 import logging
 import os
 import subprocess
 import time
 
+from .authproxy import JSONRPCException
 from .util import (
     assert_equal,
     get_rpc_proxy,
     rpc_url,
+    wait_until,
+    p2p_port,
 )
-from .authproxy import JSONRPCException
+
+BITCOIND_PROC_WAIT_TIMEOUT = 60
 
 class TestNode():
     """A class for representing a bitcoind node under test.
@@ -26,9 +32,11 @@ class TestNode():
     - state about the node (whether it's running, etc)
     - a Python subprocess.Popen object representing the running process
     - an RPC connection to the node
+    - one or more P2P connections to the node
 
-    To make things easier for the test writer, a bit of magic is happening under the covers.
-    Any unrecognised messages will be dispatched to the RPC connection."""
+
+    To make things easier for the test writer, any unrecognised messages will
+    be dispatched to the RPC connection."""
 
     def __init__(self, i, dirname, extra_args, rpchost, timewait, binary, stderr, mocktime, coverage_dir):
         self.index = i
@@ -49,6 +57,8 @@ class TestNode():
         self.extra_args = extra_args
         self.args = [self.binary, "-datadir=" + self.datadir, "-server", "-keypool=1", "-discover=0", "-rest", "-logtimemicros", "-debug", "-debugexclude=libevent", "-debugexclude=leveldb", "-mocktime=" + str(mocktime), "-uacomment=testnode%d" % i]
 
+        self.cli = TestNodeCLI(os.getenv("BITCOINCLI", "bitcoin-cli"), self.datadir)
+
         self.running = False
         self.process = None
         self.rpc_connected = False
@@ -56,14 +66,20 @@ class TestNode():
         self.url = None
         self.log = logging.getLogger('TestFramework.node%d' % i)
 
-    def __getattr__(self, *args, **kwargs):
+        self.p2ps = []
+
+    def __getattr__(self, name):
         """Dispatches any unrecognised messages to the RPC connection."""
         assert self.rpc_connected and self.rpc is not None, "Error: no RPC connection"
-        return self.rpc.__getattr__(*args, **kwargs)
+        return getattr(self.rpc, name)
 
-    def start(self):
+    def start(self, extra_args=None, stderr=None):
         """Start the node."""
-        self.process = subprocess.Popen(self.args + self.extra_args, stderr=self.stderr)
+        if extra_args is None:
+            extra_args = self.extra_args
+        if stderr is None:
+            stderr = self.stderr
+        self.process = subprocess.Popen(self.args + extra_args, stderr=stderr)
         self.running = True
         self.log.debug("bitcoind started, waiting for RPC to come up")
 
@@ -74,7 +90,7 @@ class TestNode():
         for _ in range(poll_per_s * self.rpc_timeout):
             assert self.process.poll() is None, "bitcoind exited with status %i during initialization" % self.process.returncode
             try:
-                self.rpc = get_rpc_proxy(rpc_url(self.datadir, self.index, self.rpchost), self.index, coveragedir=self.coverage_dir)
+                self.rpc = get_rpc_proxy(rpc_url(self.datadir, self.index, self.rpchost), self.index, timeout=self.rpc_timeout, coveragedir=self.coverage_dir)
                 self.rpc.getblockcount()
                 # If the call to getblockcount() succeeds then the RPC connection is up
                 self.rpc_connected = True
@@ -108,6 +124,7 @@ class TestNode():
             self.stop()
         except http.client.CannotSendRequest:
             self.log.exception("Unable to stop node.")
+        del self.p2ps[:]
 
     def is_node_stopped(self):
         """Checks whether the node has stopped.
@@ -117,14 +134,20 @@ class TestNode():
         if not self.running:
             return True
         return_code = self.process.poll()
-        if return_code is not None:
-            # process has stopped. Assert that it didn't return an error code.
-            assert_equal(return_code, 0)
-            self.running = False
-            self.process = None
-            self.log.debug("Node stopped")
-            return True
-        return False
+        if return_code is None:
+            return False
+
+        # process has stopped. Assert that it didn't return an error code.
+        assert_equal(return_code, 0)
+        self.running = False
+        self.process = None
+        self.rpc_connected = False
+        self.rpc = None
+        self.log.debug("Node stopped")
+        return True
+
+    def wait_until_stopped(self, timeout=BITCOIND_PROC_WAIT_TIMEOUT):
+        wait_until(self.is_node_stopped, timeout=timeout)
 
     def node_encrypt_wallet(self, passphrase):
         """"Encrypts the wallet.
@@ -132,7 +155,73 @@ class TestNode():
         This causes bitcoind to shutdown, so this method takes
         care of cleaning up resources."""
         self.encryptwallet(passphrase)
-        while not self.is_node_stopped():
-            time.sleep(0.1)
-        self.rpc = None
-        self.rpc_connected = False
+        self.wait_until_stopped()
+
+    def add_p2p_connection(self, p2p_conn, *args, **kwargs):
+        """Add a p2p connection to the node.
+
+        This method adds the p2p connection to the self.p2ps list and also
+        returns the connection to the caller."""
+        if 'dstport' not in kwargs:
+            kwargs['dstport'] = p2p_port(self.index)
+        if 'dstaddr' not in kwargs:
+            kwargs['dstaddr'] = '127.0.0.1'
+
+        p2p_conn.peer_connect(*args, **kwargs)
+        self.p2ps.append(p2p_conn)
+
+        return p2p_conn
+
+    @property
+    def p2p(self):
+        """Return the first p2p connection
+
+        Convenience property - most tests only use a single p2p connection to each
+        node, so this saves having to write node.p2ps[0] many times."""
+        assert self.p2ps, "No p2p connection"
+        return self.p2ps[0]
+
+    def disconnect_p2ps(self):
+        """Close all p2p connections to the node."""
+        for p in self.p2ps:
+            p.peer_disconnect()
+        del self.p2ps[:]
+
+
+class TestNodeCLI():
+    """Interface to bitcoin-cli for an individual node"""
+
+    def __init__(self, binary, datadir):
+        self.args = []
+        self.binary = binary
+        self.datadir = datadir
+        self.input = None
+
+    def __call__(self, *args, input=None):
+        # TestNodeCLI is callable with bitcoin-cli command-line args
+        self.args = [str(arg) for arg in args]
+        self.input = input
+        return self
+
+    def __getattr__(self, command):
+        def dispatcher(*args, **kwargs):
+            return self.send_cli(command, *args, **kwargs)
+        return dispatcher
+
+    def send_cli(self, command, *args, **kwargs):
+        """Run bitcoin-cli command. Deserializes returned string as python object."""
+
+        pos_args = [str(arg) for arg in args]
+        named_args = [str(key) + "=" + str(value) for (key, value) in kwargs.items()]
+        assert not (pos_args and named_args), "Cannot use positional arguments and named arguments in the same bitcoin-cli call"
+        p_args = [self.binary, "-datadir=" + self.datadir] + self.args
+        if named_args:
+            p_args += ["-named"]
+        p_args += [command] + pos_args + named_args
+        process = subprocess.Popen(p_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        cli_stdout, cli_stderr = process.communicate(input=self.input)
+        returncode = process.poll()
+        if returncode:
+            # Ignore cli_stdout, raise with cli_stderr
+            raise subprocess.CalledProcessError(returncode, self.binary, output=cli_stderr)
+        return json.loads(cli_stdout, parse_float=decimal.Decimal)

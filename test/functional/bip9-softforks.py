@@ -22,22 +22,21 @@ import itertools
 
 from test_framework.test_framework import ComparisonTestFramework
 from test_framework.util import *
-from test_framework.mininode import CTransaction, NetworkThread
+from test_framework.mininode import CTransaction, network_thread_start
 from test_framework.blocktools import create_coinbase, create_block
 from test_framework.comptool import TestInstance, TestManager
 from test_framework.script import CScript, OP_1NEGATE, OP_CHECKSEQUENCEVERIFY, OP_DROP
 
 class BIP9SoftForksTest(ComparisonTestFramework):
-
-    def __init__(self):
-        super().__init__()
+    def set_test_params(self):
         self.num_nodes = 1
         self.extra_args = [['-whitelist=127.0.0.1']]
+        self.setup_clean_chain = True
 
     def run_test(self):
         self.test = TestManager(self, self.options.tmpdir)
         self.test.add_all_connections(self.nodes)
-        NetworkThread().start() # Start up network handling in another thread
+        network_thread_start()
         self.test.run()
 
     def create_transaction(self, node, coinbase, to_address, amount):
@@ -241,12 +240,13 @@ class BIP9SoftForksTest(ComparisonTestFramework):
         # Restart all
         self.test.clear_all_connections()
         self.stop_nodes()
+        self.nodes = []
         shutil.rmtree(self.options.tmpdir + "/node0")
         self.setup_chain()
         self.setup_network()
         self.test.add_all_connections(self.nodes)
-        NetworkThread().start()
-        self.test.test_nodes[0].wait_for_verack()
+        network_thread_start()
+        self.test.p2p_connections[0].wait_for_verack()
 
     def get_tests(self):
         for test in itertools.chain(

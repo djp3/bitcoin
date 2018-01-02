@@ -10,23 +10,21 @@ from test_framework.util import (
     connect_nodes_bi,
 )
 import shutil
-
+import os
 
 class WalletHDTest(BitcoinTestFramework):
-
-    def __init__(self):
-        super().__init__()
+    def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 2
-        self.extra_args = [['-usehd=0'], ['-usehd=1', '-keypool=0']]
+        self.extra_args = [[], ['-keypool=0']]
 
     def run_test (self):
         tmpdir = self.options.tmpdir
 
         # Make sure can't switch off usehd after wallet creation
         self.stop_node(1)
-        self.assert_start_raises_init_error(1, self.options.tmpdir, ['-usehd=0'], 'already existing HD wallet')
-        self.nodes[1] = self.start_node(1, self.options.tmpdir, self.extra_args[1])
+        self.assert_start_raises_init_error(1, ['-usehd=0'], 'already existing HD wallet')
+        self.start_node(1)
         connect_nodes_bi(self.nodes, 0, 1)
 
         # Make sure we use hd, keep masterkeyid
@@ -73,10 +71,10 @@ class WalletHDTest(BitcoinTestFramework):
         self.stop_node(1)
         # we need to delete the complete regtest directory
         # otherwise node1 would auto-recover all funds in flag the keypool keys as used
-        shutil.rmtree(tmpdir + "/node1/regtest/blocks")
-        shutil.rmtree(tmpdir + "/node1/regtest/chainstate")
-        shutil.copyfile(tmpdir + "/hd.bak", tmpdir + "/node1/regtest/wallet.dat")
-        self.nodes[1] = self.start_node(1, self.options.tmpdir, self.extra_args[1])
+        shutil.rmtree(os.path.join(tmpdir, "node1/regtest/blocks"))
+        shutil.rmtree(os.path.join(tmpdir, "node1/regtest/chainstate"))
+        shutil.copyfile(os.path.join(tmpdir, "hd.bak"), os.path.join(tmpdir, "node1/regtest/wallets/wallet.dat"))
+        self.start_node(1)
 
         # Assert that derivation is deterministic
         hd_add_2 = None
@@ -91,7 +89,23 @@ class WalletHDTest(BitcoinTestFramework):
 
         # Needs rescan
         self.stop_node(1)
-        self.nodes[1] = self.start_node(1, self.options.tmpdir, self.extra_args[1] + ['-rescan'])
+        self.start_node(1, extra_args=self.extra_args[1] + ['-rescan'])
+        assert_equal(self.nodes[1].getbalance(), num_hd_adds + 1)
+
+        # Try a RPC based rescan
+        self.stop_node(1)
+        shutil.rmtree(os.path.join(tmpdir, "node1/regtest/blocks"))
+        shutil.rmtree(os.path.join(tmpdir, "node1/regtest/chainstate"))
+        shutil.copyfile(os.path.join(tmpdir, "hd.bak"), os.path.join(tmpdir, "node1/regtest/wallet.dat"))
+        self.start_node(1, extra_args=self.extra_args[1])
+        connect_nodes_bi(self.nodes, 0, 1)
+        self.sync_all()
+        out = self.nodes[1].rescanblockchain(0, 1)
+        assert_equal(out['start_height'], 0)
+        assert_equal(out['stop_height'], 1)
+        out = self.nodes[1].rescanblockchain()
+        assert_equal(out['start_height'], 0)
+        assert_equal(out['stop_height'], self.nodes[1].getblockcount())
         assert_equal(self.nodes[1].getbalance(), num_hd_adds + 1)
 
         # send a tx and make sure its using the internal chain for the changeoutput
