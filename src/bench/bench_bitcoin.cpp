@@ -27,7 +27,7 @@ main(int argc, char** argv)
 {
     gArgs.ParseParameters(argc, argv);
 
-    if (gArgs.IsArgSet("-?") || gArgs.IsArgSet("-h") || gArgs.IsArgSet("-help")) {
+    if (HelpRequested(gArgs)) {
         std::cout << HelpMessageGroup(_("Options:"))
                   << HelpMessageOpt("-?", _("Print this help message and exit"))
                   << HelpMessageOpt("-list", _("List benchmarks without executing them. Can be combined with -scaling and -filter"))
@@ -46,7 +46,6 @@ main(int argc, char** argv)
     RandomInit();
     ECC_Start();
     SetupEnvironment();
-    fPrintToDebugLog = false; // don't want to write to debug.log file
 
     int64_t evaluations = gArgs.GetArg("-evals", DEFAULT_BENCH_EVALUATIONS);
     std::string regex_filter = gArgs.GetArg("-filter", DEFAULT_BENCH_FILTER);

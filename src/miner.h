@@ -41,6 +41,12 @@ struct CTxMemPoolModifiedEntry {
         nSigOpCostWithAncestors = entry->GetSigOpCostWithAncestors();
     }
 
+    int64_t GetModifiedFee() const { return iter->GetModifiedFee(); }
+    uint64_t GetSizeWithAncestors() const { return nSizeWithAncestors; }
+    CAmount GetModFeesWithAncestors() const { return nModFeesWithAncestors; }
+    size_t GetTxSize() const { return iter->GetTxSize(); }
+    const CTransaction& GetTx() const { return iter->GetTx(); }
+
     CTxMemPool::txiter iter;
     uint64_t nSizeWithAncestors;
     CAmount nModFeesWithAncestors;
@@ -64,21 +70,6 @@ struct modifiedentry_iter {
     result_type operator() (const CTxMemPoolModifiedEntry &entry) const
     {
         return entry.iter;
-    }
-};
-
-// This matches the calculation in CompareTxMemPoolEntryByAncestorFee,
-// except operating on CTxMemPoolModifiedEntry.
-// TODO: refactor to avoid duplication of this logic.
-struct CompareModifiedEntry {
-    bool operator()(const CTxMemPoolModifiedEntry &a, const CTxMemPoolModifiedEntry &b) const
-    {
-        double f1 = (double)a.nModFeesWithAncestors * b.nSizeWithAncestors;
-        double f2 = (double)b.nModFeesWithAncestors * a.nSizeWithAncestors;
-        if (f1 == f2) {
-            return CTxMemPool::CompareIteratorByHash()(a.iter, b.iter);
-        }
-        return f1 > f2;
     }
 };
 
@@ -106,7 +97,7 @@ typedef boost::multi_index_container<
             // Reuse same tag from CTxMemPool's similar index
             boost::multi_index::tag<ancestor_score>,
             boost::multi_index::identity<CTxMemPoolModifiedEntry>,
-            CompareModifiedEntry
+            CompareTxMemPoolEntryByAncestorFee
         >
     >
 > indexed_modified_transaction_set;
@@ -194,7 +185,7 @@ private:
       * or if the transaction's cached data in mapTx is incorrect. */
     bool SkipMapTxEntry(CTxMemPool::txiter it, indexed_modified_transaction_set &mapModifiedTx, CTxMemPool::setEntries &failedTx);
     /** Sort the package in an order that is valid to appear in a block */
-    void SortForBlock(const CTxMemPool::setEntries& package, CTxMemPool::txiter entry, std::vector<CTxMemPool::txiter>& sortedEntries);
+    void SortForBlock(const CTxMemPool::setEntries& package, std::vector<CTxMemPool::txiter>& sortedEntries);
     /** Add descendants of given transactions to mapModifiedTx with ancestor
       * state updated assuming given transactions are inBlock. Returns number
       * of updated descendants. */

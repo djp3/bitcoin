@@ -4,7 +4,7 @@
 # Copyright (c) 2010-2017 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-"""Bitcoin test framework primitive and message strcutures
+"""Bitcoin test framework primitive and message structures
 
 CBlock, CTransaction, CBlockHeader, CTxIn, CTxOut, etc....:
     data structures that should map to corresponding structures in
@@ -34,7 +34,9 @@ MY_RELAY = 1 # from version 70001 onwards, fRelay should be appended to version 
 MAX_INV_SZ = 50000
 MAX_BLOCK_BASE_SIZE = 1000000
 
-COIN = 100000000 # 1 btc in satoshis
+COIN = 100000000  # 1 btc in satoshis
+
+BIP125_SEQUENCE_NUMBER = 0xfffffffd  # Sequence number that is BIP 125 opt-in and BIP 68-opt-out
 
 NODE_NETWORK = (1 << 0)
 # NODE_GETUTXO = (1 << 1)
@@ -43,6 +45,11 @@ NODE_WITNESS = (1 << 3)
 NODE_UNSUPPORTED_SERVICE_BIT_5 = (1 << 5)
 NODE_UNSUPPORTED_SERVICE_BIT_7 = (1 << 7)
 NODE_NETWORK_LIMITED = (1 << 10)
+
+MSG_TX = 1
+MSG_BLOCK = 2
+MSG_WITNESS_FLAG = 1 << 30
+MSG_TYPE_MASK = 0xffffffff >> 2
 
 # Serialization/deserialization tools
 def sha256(s):
@@ -181,19 +188,24 @@ def ToHex(obj):
 
 class CAddress():
     def __init__(self):
+        self.time = 0
         self.nServices = 1
         self.pchReserved = b"\x00" * 10 + b"\xff" * 2
         self.ip = "0.0.0.0"
         self.port = 0
 
-    def deserialize(self, f):
+    def deserialize(self, f, with_time=True):
+        if with_time:
+            self.time = struct.unpack("<i", f.read(4))[0]
         self.nServices = struct.unpack("<Q", f.read(8))[0]
         self.pchReserved = f.read(12)
         self.ip = socket.inet_ntoa(f.read(4))
         self.port = struct.unpack(">H", f.read(2))[0]
 
-    def serialize(self):
+    def serialize(self, with_time=True):
         r = b""
+        if with_time:
+            r += struct.pack("<i", self.time)
         r += struct.pack("<Q", self.nServices)
         r += self.pchReserved
         r += socket.inet_aton(self.ip)
@@ -203,8 +215,6 @@ class CAddress():
     def __repr__(self):
         return "CAddress(nServices=%i ip=%s port=%i)" % (self.nServices,
                                                          self.ip, self.port)
-
-MSG_WITNESS_FLAG = 1<<30
 
 class CInv():
     typemap = {
@@ -453,15 +463,16 @@ class CTransaction():
         r += struct.pack("<I", self.nLockTime)
         return r
 
-    # Regular serialization is without witness -- must explicitly
-    # call serialize_with_witness to include witness data.
+    # Regular serialization is with witness -- must explicitly
+    # call serialize_without_witness to exclude witness data.
     def serialize(self):
-        return self.serialize_without_witness()
+        return self.serialize_with_witness()
 
     # Recalculate the txid (transaction hash without witness)
     def rehash(self):
         self.sha256 = None
         self.calc_sha256()
+        return self.hash
 
     # We will only cache the serialization without witness in
     # self.sha256 and self.hash -- those are expected to be the txid.
@@ -472,7 +483,7 @@ class CTransaction():
 
         if self.sha256 is None:
             self.sha256 = uint256_from_str(hash256(self.serialize_without_witness()))
-        self.hash = encode(hash256(self.serialize())[::-1], 'hex_codec').decode('ascii')
+        self.hash = encode(hash256(self.serialize_without_witness())[::-1], 'hex_codec').decode('ascii')
 
     def is_valid(self):
         self.calc_sha256()
@@ -569,7 +580,7 @@ class CBlock(CBlockHeader):
         if with_witness:
             r += ser_vector(self.vtx, "serialize_with_witness")
         else:
-            r += ser_vector(self.vtx)
+            r += ser_vector(self.vtx, "serialize_without_witness")
         return r
 
     # Calculate the merkle root given a vector of transaction hashes
@@ -636,7 +647,7 @@ class PrefilledTransaction():
         self.tx = CTransaction()
         self.tx.deserialize(f)
 
-    def serialize(self, with_witness=False):
+    def serialize(self, with_witness=True):
         r = b""
         r += ser_compact_size(self.index)
         if with_witness:
@@ -644,6 +655,9 @@ class PrefilledTransaction():
         else:
             r += self.tx.serialize_without_witness()
         return r
+
+    def serialize_without_witness(self):
+        return self.serialize(with_witness=False)
 
     def serialize_with_witness(self):
         return self.serialize(with_witness=True)
@@ -684,7 +698,7 @@ class P2PHeaderAndShortIDs():
         if with_witness:
             r += ser_vector(self.prefilled_txn, "serialize_with_witness")
         else:
-            r += ser_vector(self.prefilled_txn)
+            r += ser_vector(self.prefilled_txn, "serialize_without_witness")
         return r
 
     def __repr__(self):
@@ -815,13 +829,13 @@ class BlockTransactions():
         self.blockhash = deser_uint256(f)
         self.transactions = deser_vector(f, CTransaction)
 
-    def serialize(self, with_witness=False):
+    def serialize(self, with_witness=True):
         r = b""
         r += ser_uint256(self.blockhash)
         if with_witness:
             r += ser_vector(self.transactions, "serialize_with_witness")
         else:
-            r += ser_vector(self.transactions)
+            r += ser_vector(self.transactions, "serialize_without_witness")
         return r
 
     def __repr__(self):
@@ -850,11 +864,11 @@ class msg_version():
         self.nServices = struct.unpack("<Q", f.read(8))[0]
         self.nTime = struct.unpack("<q", f.read(8))[0]
         self.addrTo = CAddress()
-        self.addrTo.deserialize(f)
+        self.addrTo.deserialize(f, False)
 
         if self.nVersion >= 106:
             self.addrFrom = CAddress()
-            self.addrFrom.deserialize(f)
+            self.addrFrom.deserialize(f, False)
             self.nNonce = struct.unpack("<Q", f.read(8))[0]
             self.strSubVer = deser_string(f)
         else:
@@ -882,8 +896,8 @@ class msg_version():
         r += struct.pack("<i", self.nVersion)
         r += struct.pack("<Q", self.nServices)
         r += struct.pack("<q", self.nTime)
-        r += self.addrTo.serialize()
-        r += self.addrFrom.serialize()
+        r += self.addrTo.serialize(False)
+        r += self.addrFrom.serialize(False)
         r += struct.pack("<Q", self.nNonce)
         r += ser_string(self.strSubVer)
         r += struct.pack("<i", self.nStartingHeight)
@@ -1021,7 +1035,7 @@ class msg_block():
         self.block.deserialize(f)
 
     def serialize(self):
-        return self.block.serialize()
+        return self.block.serialize(with_witness=False)
 
     def __repr__(self):
         return "msg_block(block=%s)" % (repr(self.block))
@@ -1292,7 +1306,7 @@ class msg_blocktxn():
 
     def serialize(self):
         r = b""
-        r += self.block_transactions.serialize()
+        r += self.block_transactions.serialize(with_witness=False)
         return r
 
     def __repr__(self):

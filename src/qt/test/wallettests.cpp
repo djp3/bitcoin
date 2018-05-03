@@ -1,5 +1,7 @@
 #include <qt/test/wallettests.h>
+#include <qt/test/util.h>
 
+#include <interfaces/node.h>
 #include <qt/bitcoinamountfield.h>
 #include <qt/callback.h>
 #include <qt/optionsmodel.h>
@@ -10,6 +12,7 @@
 #include <qt/transactiontablemodel.h>
 #include <qt/transactionview.h>
 #include <qt/walletmodel.h>
+#include <key_io.h>
 #include <test/test_bitcoin.h>
 #include <validation.h>
 #include <wallet/wallet.h>
@@ -17,6 +20,8 @@
 #include <qt/receivecoinsdialog.h>
 #include <qt/recentrequeststablemodel.h>
 #include <qt/receiverequestdialog.h>
+
+#include <memory>
 
 #include <QAbstractButton>
 #include <QAction>
@@ -31,21 +36,6 @@
 
 namespace
 {
-//! Press "Ok" button in message box dialog.
-void ConfirmMessage(QString* text = nullptr)
-{
-    QTimer::singleShot(0, makeCallback([text](Callback* callback) {
-        for (QWidget* widget : QApplication::topLevelWidgets()) {
-            if (widget->inherits("QMessageBox")) {
-                QMessageBox* messageBox = qobject_cast<QMessageBox*>(widget);
-                if (text) *text = messageBox->text();
-                messageBox->defaultButton()->click();
-            }
-        }
-        delete callback;
-    }), SLOT(call()));
-}
-
 //! Press "Yes" or "Cancel" buttons in modal send confirmation dialog.
 void ConfirmSend(QString* text = nullptr, bool cancel = false)
 {
@@ -154,19 +144,19 @@ void TestGUI()
     for (int i = 0; i < 5; ++i) {
         test.CreateAndProcessBlock({}, GetScriptForRawPubKey(test.coinbaseKey.GetPubKey()));
     }
-    bitdb.MakeMock();
-    std::unique_ptr<CWalletDBWrapper> dbw(new CWalletDBWrapper(&bitdb, "wallet_test.dat"));
-    CWallet wallet(std::move(dbw));
+    CWallet wallet("mock", WalletDatabase::CreateMock());
     bool firstRun;
     wallet.LoadWallet(firstRun);
     {
         LOCK(wallet.cs_wallet);
-        wallet.SetAddressBook(test.coinbaseKey.GetPubKey().GetID(), "", "receive");
+        wallet.SetAddressBook(GetDestinationForKey(test.coinbaseKey.GetPubKey(), wallet.m_default_address_type), "", "receive");
         wallet.AddKeyPubKey(test.coinbaseKey, test.coinbaseKey.GetPubKey());
     }
     {
         LOCK(cs_main);
-        wallet.ScanForWalletTransactions(chainActive.Genesis(), nullptr, true);
+        WalletRescanReserver reserver(&wallet);
+        reserver.reserve();
+        wallet.ScanForWalletTransactions(chainActive.Genesis(), nullptr, reserver, true);
     }
     wallet.SetBroadcastTransactions(true);
 
@@ -174,8 +164,11 @@ void TestGUI()
     std::unique_ptr<const PlatformStyle> platformStyle(PlatformStyle::instantiate("other"));
     SendCoinsDialog sendCoinsDialog(platformStyle.get());
     TransactionView transactionView(platformStyle.get());
-    OptionsModel optionsModel;
-    WalletModel walletModel(platformStyle.get(), &wallet, &optionsModel);
+    auto node = interfaces::MakeNode();
+    OptionsModel optionsModel(*node);
+    AddWallet(&wallet);
+    WalletModel walletModel(std::move(node->getWallets().back()), *node, platformStyle.get(), &optionsModel);
+    RemoveWallet(&wallet);
     sendCoinsDialog.setModel(&walletModel);
     transactionView.setModel(&walletModel);
 
@@ -200,7 +193,7 @@ void TestGUI()
     QLabel* balanceLabel = overviewPage.findChild<QLabel*>("labelBalance");
     QString balanceText = balanceLabel->text();
     int unit = walletModel.getOptionsModel()->getDisplayUnit();
-    CAmount balance = walletModel.getBalance();
+    CAmount balance = walletModel.wallet().getBalance();
     QString balanceComparison = BitcoinUnits::formatWithUnit(unit, balance, false, BitcoinUnits::separatorAlways);
     QCOMPARE(balanceText, balanceComparison);
 
@@ -255,12 +248,9 @@ void TestGUI()
     QPushButton* removeRequestButton = receiveCoinsDialog.findChild<QPushButton*>("removeRequestButton");
     removeRequestButton->click();
     QCOMPARE(requestTableModel->rowCount({}), currentRowCount-1);
-
-    bitdb.Flush(true);
-    bitdb.Reset();
 }
 
-}
+} // namespace
 
 void WalletTests::walletTests()
 {
