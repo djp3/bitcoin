@@ -40,7 +40,7 @@
  * Use the buttons <code>Namespaces</code>, <code>Classes</code> or <code>Files</code> at the top of the page to start navigating the code.
  */
 
-void WaitForShutdown()
+static void WaitForShutdown()
 {
     while (!ShutdownRequested())
     {
@@ -53,7 +53,7 @@ void WaitForShutdown()
 //
 // Start
 //
-bool AppInit(int argc, char* argv[])
+static bool AppInit(int argc, char* argv[])
 {
     bool fRet = false;
 
@@ -61,6 +61,10 @@ bool AppInit(int argc, char* argv[])
     // Parameters
     //
     // If Qt is used, parameters/bitcoin.conf are parsed in qt/bitcoin.cpp's main()
+    SetupServerArgs();
+#if HAVE_DECL_DAEMON
+    gArgs.AddArg("-daemon", _("Run in the background as a daemon and accept commands"), false, OptionsCategory::OPTIONS);
+#endif
     gArgs.ParseParameters(argc, argv);
 
     // Process help and version before taking care about datadir
@@ -76,7 +80,7 @@ bool AppInit(int argc, char* argv[])
             strUsage += "\n" + _("Usage:") + "\n" +
                   "  bitcoind [options]                     " + strprintf(_("Start %s Daemon"), _(PACKAGE_NAME)) + "\n";
 
-            strUsage += "\n" + HelpMessage(HelpMessageMode::BITCOIND);
+            strUsage += "\n" + gArgs.GetHelpMessage();
         }
 
         fprintf(stdout, "%s", strUsage.c_str());
@@ -92,7 +96,7 @@ bool AppInit(int argc, char* argv[])
         }
         try
         {
-            gArgs.ReadConfigFile(gArgs.GetArg("-conf", BITCOIN_CONF_FILENAME));
+            gArgs.ReadConfigFiles();
         } catch (const std::exception& e) {
             fprintf(stderr,"Error reading configuration file: %s\n", e.what());
             return false;
