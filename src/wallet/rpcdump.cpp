@@ -56,7 +56,7 @@ static std::string DecodeDumpString(const std::string &str) {
     for (unsigned int pos = 0; pos < str.length(); pos++) {
         unsigned char c = str[pos];
         if (c == '%' && pos+2 < str.length()) {
-            c = (((str[pos+1]>>6)*9+((str[pos+1]-'0')&15)) << 4) | 
+            c = (((str[pos+1]>>6)*9+((str[pos+1]-'0')&15)) << 4) |
                 ((str[pos+2]>>6)*9+((str[pos+2]-'0')&15));
             pos += 2;
         }
@@ -89,7 +89,8 @@ static bool GetWalletAddressesForKey(CWallet * const pwallet, const CKeyID &keyi
 
 UniValue importprivkey(const JSONRPCRequest& request)
 {
-    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet* const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -185,7 +186,8 @@ UniValue importprivkey(const JSONRPCRequest& request)
 
 UniValue abortrescan(const JSONRPCRequest& request)
 {
-    CWallet* const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet* const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -209,7 +211,7 @@ UniValue abortrescan(const JSONRPCRequest& request)
 }
 
 static void ImportAddress(CWallet*, const CTxDestination& dest, const std::string& strLabel);
-static void ImportScript(CWallet* const pwallet, const CScript& script, const std::string& strLabel, bool isRedeemScript)
+static void ImportScript(CWallet* const pwallet, const CScript& script, const std::string& strLabel, bool isRedeemScript) EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet)
 {
     if (!isRedeemScript && ::IsMine(*pwallet, script) == ISMINE_SPENDABLE) {
         throw JSONRPCError(RPC_WALLET_ERROR, "The wallet already contains the private key for this address or script");
@@ -235,7 +237,7 @@ static void ImportScript(CWallet* const pwallet, const CScript& script, const st
     }
 }
 
-static void ImportAddress(CWallet* const pwallet, const CTxDestination& dest, const std::string& strLabel)
+static void ImportAddress(CWallet* const pwallet, const CTxDestination& dest, const std::string& strLabel) EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet)
 {
     CScript script = GetScriptForDestination(dest);
     ImportScript(pwallet, script, strLabel, false);
@@ -246,7 +248,8 @@ static void ImportAddress(CWallet* const pwallet, const CTxDestination& dest, co
 
 UniValue importaddress(const JSONRPCRequest& request)
 {
-    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet* const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -330,7 +333,8 @@ UniValue importaddress(const JSONRPCRequest& request)
 
 UniValue importprunedfunds(const JSONRPCRequest& request)
 {
-    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet* const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -392,7 +396,8 @@ UniValue importprunedfunds(const JSONRPCRequest& request)
 
 UniValue removeprunedfunds(const JSONRPCRequest& request)
 {
-    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet* const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -430,7 +435,8 @@ UniValue removeprunedfunds(const JSONRPCRequest& request)
 
 UniValue importpubkey(const JSONRPCRequest& request)
 {
-    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet* const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -506,7 +512,8 @@ UniValue importpubkey(const JSONRPCRequest& request)
 
 UniValue importwallet(const JSONRPCRequest& request)
 {
-    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet* const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -552,7 +559,7 @@ UniValue importwallet(const JSONRPCRequest& request)
         file.seekg(0, file.beg);
 
         // Use uiInterface.ShowProgress instead of pwallet.ShowProgress because pwallet.ShowProgress has a cancel button tied to AbortRescan which
-        // we don't want for this progress bar shoing the import progress. uiInterface.ShowProgress does not have a cancel button.
+        // we don't want for this progress bar showing the import progress. uiInterface.ShowProgress does not have a cancel button.
         uiInterface.ShowProgress(_("Importing..."), 0, false); // show progress dialog in GUI
         while (file.good()) {
             uiInterface.ShowProgress("", std::max(1, std::min(99, (int)(((double)file.tellg() / (double)nFilesize) * 100))), false);
@@ -640,7 +647,8 @@ UniValue importwallet(const JSONRPCRequest& request)
 
 UniValue dumpprivkey(const JSONRPCRequest& request)
 {
-    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet* const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -683,7 +691,8 @@ UniValue dumpprivkey(const JSONRPCRequest& request)
 
 UniValue dumpwallet(const JSONRPCRequest& request)
 {
-    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    CWallet* const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
         return NullUniValue;
     }
@@ -752,13 +761,13 @@ UniValue dumpwallet(const JSONRPCRequest& request)
     file << "\n";
 
     // add the base58check encoded extended master if the wallet uses HD
-    CKeyID masterKeyID = pwallet->GetHDChain().masterKeyID;
-    if (!masterKeyID.IsNull())
+    CKeyID seed_id = pwallet->GetHDChain().seed_id;
+    if (!seed_id.IsNull())
     {
-        CKey key;
-        if (pwallet->GetKey(masterKeyID, key)) {
+        CKey seed;
+        if (pwallet->GetKey(seed_id, seed)) {
             CExtKey masterKey;
-            masterKey.SetMaster(key.begin(), key.size());
+            masterKey.SetSeed(seed.begin(), seed.size());
 
             file << "# extended private masterkey: " << EncodeExtKey(masterKey) << "\n\n";
         }
@@ -773,12 +782,12 @@ UniValue dumpwallet(const JSONRPCRequest& request)
             file << strprintf("%s %s ", EncodeSecret(key), strTime);
             if (GetWalletAddressesForKey(pwallet, keyid, strAddr, strLabel)) {
                file << strprintf("label=%s", strLabel);
-            } else if (keyid == masterKeyID) {
-                file << "hdmaster=1";
+            } else if (keyid == seed_id) {
+                file << "hdseed=1";
             } else if (mapKeyPool.count(keyid)) {
                 file << "reserve=1";
-            } else if (pwallet->mapKeyMetadata[keyid].hdKeypath == "m") {
-                file << "inactivehdmaster=1";
+            } else if (pwallet->mapKeyMetadata[keyid].hdKeypath == "s") {
+                file << "inactivehdseed=1";
             } else {
                 file << "change=1";
             }
@@ -811,7 +820,7 @@ UniValue dumpwallet(const JSONRPCRequest& request)
 }
 
 
-static UniValue ProcessImport(CWallet * const pwallet, const UniValue& data, const int64_t timestamp)
+static UniValue ProcessImport(CWallet * const pwallet, const UniValue& data, const int64_t timestamp) EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet)
 {
     try {
         bool success = false;
@@ -1127,7 +1136,8 @@ static int64_t GetImportTimestamp(const UniValue& data, int64_t now)
 
 UniValue importmulti(const JSONRPCRequest& mainRequest)
 {
-    CWallet * const pwallet = GetWalletForJSONRPCRequest(mainRequest);
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(mainRequest);
+    CWallet* const pwallet = wallet.get();
     if (!EnsureWalletIsAvailable(pwallet, mainRequest.fHelp)) {
         return NullUniValue;
     }

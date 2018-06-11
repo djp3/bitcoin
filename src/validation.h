@@ -398,6 +398,8 @@ void InitScriptExecutionCache();
 /** Functions for disk access for blocks */
 bool ReadBlockFromDisk(CBlock& block, const CDiskBlockPos& pos, const Consensus::Params& consensusParams);
 bool ReadBlockFromDisk(CBlock& block, const CBlockIndex* pindex, const Consensus::Params& consensusParams);
+bool ReadRawBlockFromDisk(std::vector<uint8_t>& block, const CDiskBlockPos& pos, const CMessageHeader::MessageStartChars& message_start);
+bool ReadRawBlockFromDisk(std::vector<uint8_t>& block, const CBlockIndex* pindex, const CMessageHeader::MessageStartChars& message_start);
 
 /** Functions for validating blocks and updating the block tree */
 
@@ -494,5 +496,11 @@ bool DumpMempool();
 
 /** Load the mempool from disk. */
 bool LoadMempool();
+
+//! Check whether the block associated with this index entry is pruned or not.
+inline bool IsBlockPruned(const CBlockIndex* pblockindex)
+{
+    return (fHavePruned && !(pblockindex->nStatus & BLOCK_HAVE_DATA) && pblockindex->nTx > 0);
+}
 
 #endif // BITCOIN_VALIDATION_H

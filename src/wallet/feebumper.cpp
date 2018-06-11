@@ -18,7 +18,7 @@
 
 //! Check whether transaction has descendant in wallet or mempool, or has been
 //! mined, or conflicts with a mined transaction. Return a feebumper::Result.
-static feebumper::Result PreconditionChecks(const CWallet* wallet, const CWalletTx& wtx, std::vector<std::string>& errors)
+static feebumper::Result PreconditionChecks(const CWallet* wallet, const CWalletTx& wtx, std::vector<std::string>& errors) EXCLUSIVE_LOCKS_REQUIRED(wallet->cs_wallet)
 {
     if (wallet->HasWalletSpend(wtx.GetHash())) {
         errors.push_back("Transaction has descendants in the wallet");
@@ -185,7 +185,7 @@ Result CreateTransaction(const CWallet* wallet, const uint256& txid, const CCoin
     // If the output is not large enough to pay the fee, fail.
     CAmount nDelta = new_fee - old_fee;
     assert(nDelta > 0);
-    mtx =  *wtx.tx;
+    mtx = CMutableTransaction{*wtx.tx};
     CTxOut* poutput = &(mtx.vout[nOutput]);
     if (poutput->nValue < nDelta) {
         errors.push_back("Change output is too small to bump the fee");

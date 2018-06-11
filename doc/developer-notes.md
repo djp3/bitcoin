@@ -499,7 +499,35 @@ Strings and formatting
 
 - Use `ParseInt32`, `ParseInt64`, `ParseUInt32`, `ParseUInt64`, `ParseDouble` from `utilstrencodings.h` for number parsing
 
-  - *Rationale*: These functions do overflow checking, and avoid pesky locale issues
+  - *Rationale*: These functions do overflow checking, and avoid pesky locale issues.
+
+- Avoid using locale dependent functions if possible. You can use the provided
+  [`lint-locale-dependence.sh`](/contrib/devtools/lint-locale-dependence.sh)
+  to check for accidental use of locale dependent functions.
+
+  - *Rationale*: Unnecessary locale dependence can cause bugs that are very tricky to isolate and fix.
+
+  - These functions are known to be locale dependent:
+    `alphasort`, `asctime`, `asprintf`, `atof`, `atoi`, `atol`, `atoll`, `atoq`,
+    `btowc`, `ctime`, `dprintf`, `fgetwc`, `fgetws`, `fprintf`, `fputwc`,
+    `fputws`, `fscanf`, `fwprintf`, `getdate`, `getwc`, `getwchar`, `isalnum`,
+    `isalpha`, `isblank`, `iscntrl`, `isdigit`, `isgraph`, `islower`, `isprint`,
+    `ispunct`, `isspace`, `isupper`, `iswalnum`, `iswalpha`, `iswblank`,
+    `iswcntrl`, `iswctype`, `iswdigit`, `iswgraph`, `iswlower`, `iswprint`,
+    `iswpunct`, `iswspace`, `iswupper`, `iswxdigit`, `isxdigit`, `mblen`,
+    `mbrlen`, `mbrtowc`, `mbsinit`, `mbsnrtowcs`, `mbsrtowcs`, `mbstowcs`,
+    `mbtowc`, `mktime`, `putwc`, `putwchar`, `scanf`, `snprintf`, `sprintf`,
+    `sscanf`, `stoi`, `stol`, `stoll`, `strcasecmp`, `strcasestr`, `strcoll`,
+    `strfmon`, `strftime`, `strncasecmp`, `strptime`, `strtod`, `strtof`,
+    `strtoimax`, `strtol`, `strtold`, `strtoll`, `strtoq`, `strtoul`,
+    `strtoull`, `strtoumax`, `strtouq`, `strxfrm`, `swprintf`, `tolower`,
+    `toupper`, `towctrans`, `towlower`, `towupper`, `ungetwc`, `vasprintf`,
+    `vdprintf`, `versionsort`, `vfprintf`, `vfscanf`, `vfwprintf`, `vprintf`,
+    `vscanf`, `vsnprintf`, `vsprintf`, `vsscanf`, `vswprintf`, `vwprintf`,
+    `wcrtomb`, `wcscasecmp`, `wcscoll`, `wcsftime`, `wcsncasecmp`, `wcsnrtombs`,
+    `wcsrtombs`, `wcstod`, `wcstof`, `wcstoimax`, `wcstol`, `wcstold`,
+    `wcstoll`, `wcstombs`, `wcstoul`, `wcstoull`, `wcstoumax`, `wcswidth`,
+    `wcsxfrm`, `wctob`, `wctomb`, `wctrans`, `wctype`, `wcwidth`, `wprintf`
 
 - For `strprintf`, `LogPrint`, `LogPrintf` formatting characters don't need size specifiers
 
@@ -594,8 +622,8 @@ namespace {
 
   - *Rationale*: Avoids confusion about the namespace context
 
-- Prefer `#include <primitives/transaction.h>` bracket syntax instead of
-  `#include "primitives/transactions.h"` quote syntax when possible.
+- Use `#include <primitives/transaction.h>` bracket syntax instead of
+  `#include "primitives/transactions.h"` quote syntax.
 
   - *Rationale*: Bracket syntax is less ambiguous because the preprocessor
     searches a fixed list of include directories without taking location of the
@@ -647,7 +675,7 @@ Others are external projects without a tight relationship with our project.  Cha
 be sent upstream but bugfixes may also be prudent to PR against Bitcoin Core so that they can be integrated
 quickly.  Cosmetic changes should be purely taken upstream.
 
-There is a tool in contrib/devtools/git-subtree-check.sh to check a subtree directory for consistency with
+There is a tool in `test/lint/git-subtree-check.sh` to check a subtree directory for consistency with
 its upstream repository.
 
 Current subtrees include:
@@ -778,7 +806,7 @@ To create a scripted-diff:
     - `-BEGIN VERIFY SCRIPT-`
     - `-END VERIFY SCRIPT-`
 
-The scripted-diff is verified by the tool `contrib/devtools/commit-script-check.sh`
+The scripted-diff is verified by the tool `test/lint/commit-script-check.sh`
 
 Commit [`bb81e173`](https://github.com/bitcoin/bitcoin/commit/bb81e173) is an example of a scripted-diff.
 

@@ -6,19 +6,22 @@
 from decimal import Decimal
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import (assert_array_result,
-                                 assert_equal,
-                                 assert_raises_rpc_error,
-                                 )
+from test_framework.util import (
+    assert_array_result,
+    assert_equal,
+    assert_raises_rpc_error,
+    sync_blocks,
+)
+
 
 class ReceivedByTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
-        self.extra_args = [['-deprecatedrpc=accounts']] * 2
 
     def run_test(self):
         # Generate block to get out of IBD
         self.nodes[0].generate(1)
+        sync_blocks(self.nodes)
 
         self.log.info("listreceivedbyaddress Test")
 
@@ -112,8 +115,9 @@ class ReceivedByTest(BitcoinTestFramework):
         self.log.info("listreceivedbylabel + getreceivedbylabel Test")
 
         # set pre-state
+        label = ''
         address = self.nodes[1].getnewaddress()
-        label = self.nodes[1].getaccount(address)
+        assert_equal(self.nodes[1].getaddressinfo(address)['label'], label)
         received_by_label_json = [r for r in self.nodes[1].listreceivedbylabel() if r["label"] == label][0]
         balance_by_label = self.nodes[1].getreceivedbylabel(label)
 
@@ -141,7 +145,8 @@ class ReceivedByTest(BitcoinTestFramework):
         assert_equal(balance, balance_by_label + Decimal("0.1"))
 
         # Create a new label named "mynewlabel" that has a 0 balance
-        self.nodes[1].getlabeladdress(label="mynewlabel", force=True)
+        address = self.nodes[1].getnewaddress()
+        self.nodes[1].setlabel(address, "mynewlabel")
         received_by_label_json = [r for r in self.nodes[1].listreceivedbylabel(0, True) if r["label"] == "mynewlabel"][0]
 
         # Test includeempty of listreceivedbylabel
