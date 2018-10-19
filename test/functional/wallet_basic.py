@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2017 The Bitcoin Core developers
+# Copyright (c) 2014-2018 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the wallet."""
@@ -22,6 +22,9 @@ class WalletTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 4
         self.setup_clean_chain = True
+
+    def skip_test_if_missing_module(self):
+        self.skip_if_no_wallet()
 
     def setup_network(self):
         self.add_nodes(4)
@@ -131,9 +134,15 @@ class WalletTest(BitcoinTestFramework):
         assert_equal([unspent_0], self.nodes[2].listlockunspent())
         self.nodes[2].lockunspent(True, [unspent_0])
         assert_equal(len(self.nodes[2].listlockunspent()), 0)
-        assert_raises_rpc_error(-8, "Invalid parameter, unknown transaction",
+        assert_raises_rpc_error(-8, "txid must be of length 64 (not 34, for '0000000000000000000000000000000000')",
                                 self.nodes[2].lockunspent, False,
                                 [{"txid": "0000000000000000000000000000000000", "vout": 0}])
+        assert_raises_rpc_error(-8, "txid must be hexadecimal string (not 'ZZZ0000000000000000000000000000000000000000000000000000000000000')",
+                                self.nodes[2].lockunspent, False,
+                                [{"txid": "ZZZ0000000000000000000000000000000000000000000000000000000000000", "vout": 0}])
+        assert_raises_rpc_error(-8, "Invalid parameter, unknown transaction",
+                                self.nodes[2].lockunspent, False,
+                                [{"txid": "0000000000000000000000000000000000000000000000000000000000000000", "vout": 0}])
         assert_raises_rpc_error(-8, "Invalid parameter, vout index out of bounds",
                                 self.nodes[2].lockunspent, False,
                                 [{"txid": unspent_0["txid"], "vout": 999}])

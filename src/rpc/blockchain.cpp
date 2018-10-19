@@ -1,5 +1,5 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2018 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -18,8 +18,10 @@
 #include <key_io.h>
 #include <policy/feerate.h>
 #include <policy/policy.h>
+#include <policy/rbf.h>
 #include <primitives/transaction.h>
 #include <rpc/server.h>
+#include <script/descriptor.h>
 #include <streams.h>
 #include <sync.h>
 #include <txdb.h>
@@ -28,6 +30,7 @@
 #include <utilstrencodings.h>
 #include <hash.h>
 #include <validationinterface.h>
+#include <versionbitsinfo.h>
 #include <warnings.h>
 
 #include <assert.h>
@@ -48,7 +51,7 @@ struct CUpdatedBlock
     int height;
 };
 
-static std::mutex cs_blockchange;
+static Mutex cs_blockchange;
 static std::condition_variable cond_blockchange;
 static CUpdatedBlock latestblock;
 
@@ -119,8 +122,8 @@ UniValue blockToJSON(const CBlock& block, const CBlockIndex* blockindex, bool tx
     if (chainActive.Contains(blockindex))
         confirmations = chainActive.Height() - blockindex->nHeight + 1;
     result.pushKV("confirmations", confirmations);
-    result.pushKV("strippedsize", (int)::GetSerializeSize(block, SER_NETWORK, PROTOCOL_VERSION | SERIALIZE_TRANSACTION_NO_WITNESS));
-    result.pushKV("size", (int)::GetSerializeSize(block, SER_NETWORK, PROTOCOL_VERSION));
+    result.pushKV("strippedsize", (int)::GetSerializeSize(block, PROTOCOL_VERSION | SERIALIZE_TRANSACTION_NO_WITNESS));
+    result.pushKV("size", (int)::GetSerializeSize(block, PROTOCOL_VERSION));
     result.pushKV("weight", (int)::GetBlockWeight(block));
     result.pushKV("height", blockindex->nHeight);
     result.pushKV("version", block.nVersion);
@@ -179,7 +182,7 @@ static UniValue getbestblockhash(const JSONRPCRequest& request)
             "getbestblockhash\n"
             "\nReturns the hash of the best (tip) block in the longest blockchain.\n"
             "\nResult:\n"
-            "\"hex\"      (string) the block hash hex encoded\n"
+            "\"hex\"      (string) the block hash, hex-encoded\n"
             "\nExamples:\n"
             + HelpExampleCli("getbestblockhash", "")
             + HelpExampleRpc("getbestblockhash", "")
@@ -223,7 +226,7 @@ static UniValue waitfornewblock(const JSONRPCRequest& request)
 
     CUpdatedBlock block;
     {
-        std::unique_lock<std::mutex> lock(cs_blockchange);
+        WAIT_LOCK(cs_blockchange, lock);
         block = latestblock;
         if(timeout)
             cond_blockchange.wait_for(lock, std::chrono::milliseconds(timeout), [&block]{return latestblock.height != block.height || latestblock.hash != block.hash || !IsRPCRunning(); });
@@ -258,14 +261,14 @@ static UniValue waitforblock(const JSONRPCRequest& request)
         );
     int timeout = 0;
 
-    uint256 hash = uint256S(request.params[0].get_str());
+    uint256 hash(ParseHashV(request.params[0], "blockhash"));
 
     if (!request.params[1].isNull())
         timeout = request.params[1].get_int();
 
     CUpdatedBlock block;
     {
-        std::unique_lock<std::mutex> lock(cs_blockchange);
+        WAIT_LOCK(cs_blockchange, lock);
         if(timeout)
             cond_blockchange.wait_for(lock, std::chrono::milliseconds(timeout), [&hash]{return latestblock.hash == hash || !IsRPCRunning();});
         else
@@ -308,7 +311,7 @@ static UniValue waitforblockheight(const JSONRPCRequest& request)
 
     CUpdatedBlock block;
     {
-        std::unique_lock<std::mutex> lock(cs_blockchange);
+        WAIT_LOCK(cs_blockchange, lock);
         if(timeout)
             cond_blockchange.wait_for(lock, std::chrono::milliseconds(timeout), [&height]{return latestblock.height >= height || !IsRPCRunning();});
         else
@@ -378,7 +381,8 @@ static std::string EntryDescriptionString()
            "       ... ]\n"
            "    \"spentby\" : [           (array) unconfirmed transactions spending outputs from this transaction\n"
            "        \"transactionid\",    (string) child transaction id\n"
-           "       ... ]\n";
+           "       ... ]\n"
+           "    \"bip125-replaceable\" : true|false,  (boolean) Whether this transaction could be replaced due to BIP125 (replace-by-fee)\n";
 }
 
 static void entryToJSON(UniValue &info, const CTxMemPoolEntry &e) EXCLUSIVE_LOCKS_REQUIRED(::mempool.cs)
@@ -423,11 +427,22 @@ static void entryToJSON(UniValue &info, const CTxMemPoolEntry &e) EXCLUSIVE_LOCK
     UniValue spent(UniValue::VARR);
     const CTxMemPool::txiter &it = mempool.mapTx.find(tx.GetHash());
     const CTxMemPool::setEntries &setChildren = mempool.GetMemPoolChildren(it);
-    for (const CTxMemPool::txiter &childiter : setChildren) {
+    for (CTxMemPool::txiter childiter : setChildren) {
         spent.push_back(childiter->GetTx().GetHash().ToString());
     }
 
     info.pushKV("spentby", spent);
+
+    // Add opt-in RBF status
+    bool rbfStatus = false;
+    RBFTransactionState rbfState = IsRBFOptIn(tx, mempool);
+    if (rbfState == RBFTransactionState::UNKNOWN) {
+        throw JSONRPCError(RPC_MISC_ERROR, "Transaction is not in mempool");
+    } else if (rbfState == RBFTransactionState::REPLACEABLE_BIP125) {
+        rbfStatus = true;
+    }
+
+    info.pushKV("bip125-replaceable", rbfStatus);
 }
 
 UniValue mempoolToJSON(bool fVerbose)
@@ -494,17 +509,17 @@ static UniValue getmempoolancestors(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() < 1 || request.params.size() > 2) {
         throw std::runtime_error(
-            "getmempoolancestors txid (verbose)\n"
+            "getmempoolancestors txid ( verbose )\n"
             "\nIf txid is in the mempool, returns all in-mempool ancestors.\n"
             "\nArguments:\n"
             "1. \"txid\"                 (string, required) The transaction id (must be in mempool)\n"
             "2. verbose                  (boolean, optional, default=false) True for a json object, false for array of transaction ids\n"
-            "\nResult (for verbose=false):\n"
+            "\nResult (for verbose = false):\n"
             "[                       (json array of strings)\n"
             "  \"transactionid\"           (string) The transaction id of an in-mempool ancestor transaction\n"
             "  ,...\n"
             "]\n"
-            "\nResult (for verbose=true):\n"
+            "\nResult (for verbose = true):\n"
             "{                           (json object)\n"
             "  \"transactionid\" : {       (json object)\n"
             + EntryDescriptionString()
@@ -558,17 +573,17 @@ static UniValue getmempooldescendants(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() < 1 || request.params.size() > 2) {
         throw std::runtime_error(
-            "getmempooldescendants txid (verbose)\n"
+            "getmempooldescendants txid ( verbose )\n"
             "\nIf txid is in the mempool, returns all in-mempool descendants.\n"
             "\nArguments:\n"
             "1. \"txid\"                 (string, required) The transaction id (must be in mempool)\n"
             "2. verbose                  (boolean, optional, default=false) True for a json object, false for array of transaction ids\n"
-            "\nResult (for verbose=false):\n"
+            "\nResult (for verbose = false):\n"
             "[                       (json array of strings)\n"
             "  \"transactionid\"           (string) The transaction id of an in-mempool descendant transaction\n"
             "  ,...\n"
             "]\n"
-            "\nResult (for verbose=true):\n"
+            "\nResult (for verbose = true):\n"
             "{                           (json object)\n"
             "  \"transactionid\" : {       (json object)\n"
             + EntryDescriptionString()
@@ -685,7 +700,7 @@ static UniValue getblockheader(const JSONRPCRequest& request)
             "If verbose is true, returns an Object with information about blockheader <hash>.\n"
             "\nArguments:\n"
             "1. \"hash\"          (string, required) The block hash\n"
-            "2. verbose           (boolean, optional, default=true) true for a json object, false for the hex encoded data\n"
+            "2. verbose           (boolean, optional, default=true) true for a json object, false for the hex-encoded data\n"
             "\nResult (for verbose = true):\n"
             "{\n"
             "  \"hash\" : \"hash\",     (string) the block hash (same as provided)\n"
@@ -713,8 +728,7 @@ static UniValue getblockheader(const JSONRPCRequest& request)
 
     LOCK(cs_main);
 
-    std::string strHash = request.params[0].get_str();
-    uint256 hash(uint256S(strHash));
+    uint256 hash(ParseHashV(request.params[0], "hash"));
 
     bool fVerbose = true;
     if (!request.params[1].isNull())
@@ -765,7 +779,7 @@ static UniValue getblock(const JSONRPCRequest& request)
             "If verbosity is 2, returns an Object with information about block <hash> and information about each transaction. \n"
             "\nArguments:\n"
             "1. \"blockhash\"          (string, required) The block hash\n"
-            "2. verbosity              (numeric, optional, default=1) 0 for hex encoded data, 1 for a json object, and 2 for json object with transaction data\n"
+            "2. verbosity              (numeric, optional, default=1) 0 for hex-encoded data, 1 for a json object, and 2 for json object with transaction data\n"
             "\nResult (for verbosity = 0):\n"
             "\"data\"             (string) A string that is serialized, hex-encoded data for block 'hash'.\n"
             "\nResult (for verbosity = 1):\n"
@@ -808,8 +822,7 @@ static UniValue getblock(const JSONRPCRequest& request)
 
     LOCK(cs_main);
 
-    std::string strHash = request.params[0].get_str();
-    uint256 hash(uint256S(strHash));
+    uint256 hash(ParseHashV(request.params[0], "blockhash"));
 
     int verbosity = 1;
     if (!request.params[1].isNull()) {
@@ -1033,7 +1046,7 @@ UniValue gettxout(const JSONRPCRequest& request)
             + HelpExampleCli("listunspent", "") +
             "\nView the details\n"
             + HelpExampleCli("gettxout", "\"txid\" 1") +
-            "\nAs a json rpc call\n"
+            "\nAs a JSON-RPC call\n"
             + HelpExampleRpc("gettxout", "\"txid\", 1")
         );
 
@@ -1041,8 +1054,7 @@ UniValue gettxout(const JSONRPCRequest& request)
 
     UniValue ret(UniValue::VOBJ);
 
-    std::string strHash = request.params[0].get_str();
-    uint256 hash(uint256S(strHash));
+    uint256 hash(ParseHashV(request.params[0], "txid"));
     int n = request.params[1].get_int();
     COutPoint out(hash, n);
     bool fMempool = true;
@@ -1450,8 +1462,7 @@ static UniValue preciousblock(const JSONRPCRequest& request)
             + HelpExampleRpc("preciousblock", "\"blockhash\"")
         );
 
-    std::string strHash = request.params[0].get_str();
-    uint256 hash(uint256S(strHash));
+    uint256 hash(ParseHashV(request.params[0], "blockhash"));
     CBlockIndex* pblockindex;
 
     {
@@ -1486,8 +1497,7 @@ static UniValue invalidateblock(const JSONRPCRequest& request)
             + HelpExampleRpc("invalidateblock", "\"blockhash\"")
         );
 
-    std::string strHash = request.params[0].get_str();
-    uint256 hash(uint256S(strHash));
+    uint256 hash(ParseHashV(request.params[0], "blockhash"));
     CValidationState state;
 
     {
@@ -1526,8 +1536,7 @@ static UniValue reconsiderblock(const JSONRPCRequest& request)
             + HelpExampleRpc("reconsiderblock", "\"blockhash\"")
         );
 
-    std::string strHash = request.params[0].get_str();
-    uint256 hash(uint256S(strHash));
+    uint256 hash(ParseHashV(request.params[0], "blockhash"));
 
     {
         LOCK(cs_main);
@@ -1580,7 +1589,7 @@ static UniValue getchaintxstats(const JSONRPCRequest& request)
         LOCK(cs_main);
         pindex = chainActive.Tip();
     } else {
-        uint256 hash = uint256S(request.params[1].get_str());
+        uint256 hash(ParseHashV(request.params[1], "blockhash"));
         LOCK(cs_main);
         pindex = LookupBlockIndex(hash);
         if (!pindex) {
@@ -1639,6 +1648,35 @@ static T CalculateTruncatedMedian(std::vector<T>& scores)
     }
 }
 
+void CalculatePercentilesByWeight(CAmount result[NUM_GETBLOCKSTATS_PERCENTILES], std::vector<std::pair<CAmount, int64_t>>& scores, int64_t total_weight)
+{
+    if (scores.empty()) {
+        return;
+    }
+
+    std::sort(scores.begin(), scores.end());
+
+    // 10th, 25th, 50th, 75th, and 90th percentile weight units.
+    const double weights[NUM_GETBLOCKSTATS_PERCENTILES] = {
+        total_weight / 10.0, total_weight / 4.0, total_weight / 2.0, (total_weight * 3.0) / 4.0, (total_weight * 9.0) / 10.0
+    };
+
+    int64_t next_percentile_index = 0;
+    int64_t cumulative_weight = 0;
+    for (const auto& element : scores) {
+        cumulative_weight += element.second;
+        while (next_percentile_index < NUM_GETBLOCKSTATS_PERCENTILES && cumulative_weight >= weights[next_percentile_index]) {
+            result[next_percentile_index] = element.first;
+            ++next_percentile_index;
+        }
+    }
+
+    // Fill any remaining percentiles with the last value.
+    for (int64_t i = next_percentile_index; i < NUM_GETBLOCKSTATS_PERCENTILES; i++) {
+        result[i] = scores.back().first;
+    }
+}
+
 template<typename T>
 static inline bool SetHasKeys(const std::set<T>& set) {return false;}
 template<typename T, typename Tk, typename... Args>
@@ -1672,13 +1710,19 @@ static UniValue getblockstats(const JSONRPCRequest& request)
             "  \"avgfeerate\": xxxxx,      (numeric) Average feerate (in satoshis per virtual byte)\n"
             "  \"avgtxsize\": xxxxx,       (numeric) Average transaction size\n"
             "  \"blockhash\": xxxxx,       (string) The block hash (to check for potential reorgs)\n"
+            "  \"feerate_percentiles\": [  (array of numeric) Feerates at the 10th, 25th, 50th, 75th, and 90th percentile weight unit (in satoshis per virtual byte)\n"
+            "      \"10th_percentile_feerate\",      (numeric) The 10th percentile feerate\n"
+            "      \"25th_percentile_feerate\",      (numeric) The 25th percentile feerate\n"
+            "      \"50th_percentile_feerate\",      (numeric) The 50th percentile feerate\n"
+            "      \"75th_percentile_feerate\",      (numeric) The 75th percentile feerate\n"
+            "      \"90th_percentile_feerate\",      (numeric) The 90th percentile feerate\n"
+            "  ],\n"
             "  \"height\": xxxxx,          (numeric) The height of the block\n"
             "  \"ins\": xxxxx,             (numeric) The number of inputs (excluding coinbase)\n"
             "  \"maxfee\": xxxxx,          (numeric) Maximum fee in the block\n"
             "  \"maxfeerate\": xxxxx,      (numeric) Maximum feerate (in satoshis per virtual byte)\n"
             "  \"maxtxsize\": xxxxx,       (numeric) Maximum transaction size\n"
             "  \"medianfee\": xxxxx,       (numeric) Truncated median fee in the block\n"
-            "  \"medianfeerate\": xxxxx,   (numeric) Truncated median feerate (in satoshis per virtual byte)\n"
             "  \"mediantime\": xxxxx,      (numeric) The block median time past\n"
             "  \"mediantxsize\": xxxxx,    (numeric) Truncated median transaction size\n"
             "  \"minfee\": xxxxx,          (numeric) Minimum fee in the block\n"
@@ -1719,8 +1763,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
 
         pindex = chainActive[height];
     } else {
-        const std::string strHash = request.params[0].get_str();
-        const uint256 hash(uint256S(strHash));
+        const uint256 hash(ParseHashV(request.params[0], "hash_or_height"));
         pindex = LookupBlockIndex(hash);
         if (!pindex) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
@@ -1746,13 +1789,13 @@ static UniValue getblockstats(const JSONRPCRequest& request)
     const bool do_all = stats.size() == 0; // Calculate everything if nothing selected (default)
     const bool do_mediantxsize = do_all || stats.count("mediantxsize") != 0;
     const bool do_medianfee = do_all || stats.count("medianfee") != 0;
-    const bool do_medianfeerate = do_all || stats.count("medianfeerate") != 0;
-    const bool loop_inputs = do_all || do_medianfee || do_medianfeerate ||
+    const bool do_feerate_percentiles = do_all || stats.count("feerate_percentiles") != 0;
+    const bool loop_inputs = do_all || do_medianfee || do_feerate_percentiles ||
         SetHasKeys(stats, "utxo_size_inc", "totalfee", "avgfee", "avgfeerate", "minfee", "maxfee", "minfeerate", "maxfeerate");
     const bool loop_outputs = do_all || loop_inputs || stats.count("total_out");
     const bool do_calculate_size = do_mediantxsize ||
         SetHasKeys(stats, "total_size", "avgtxsize", "mintxsize", "maxtxsize", "swtotal_size");
-    const bool do_calculate_weight = do_all || SetHasKeys(stats, "total_weight", "avgfeerate", "swtotal_weight", "avgfeerate", "medianfeerate", "minfeerate", "maxfeerate");
+    const bool do_calculate_weight = do_all || SetHasKeys(stats, "total_weight", "avgfeerate", "swtotal_weight", "avgfeerate", "feerate_percentiles", "minfeerate", "maxfeerate");
     const bool do_calculate_sw = do_all || SetHasKeys(stats, "swtxs", "swtotal_size", "swtotal_weight");
 
     CAmount maxfee = 0;
@@ -1772,7 +1815,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
     int64_t total_weight = 0;
     int64_t utxo_size_inc = 0;
     std::vector<CAmount> fee_array;
-    std::vector<CAmount> feerate_array;
+    std::vector<std::pair<CAmount, int64_t>> feerate_array;
     std::vector<int64_t> txsize_array;
 
     for (const auto& tx : block.vtx) {
@@ -1782,7 +1825,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
         if (loop_outputs) {
             for (const CTxOut& out : tx->vout) {
                 tx_total_out += out.nValue;
-                utxo_size_inc += GetSerializeSize(out, SER_NETWORK, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
+                utxo_size_inc += GetSerializeSize(out, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
             }
         }
 
@@ -1833,7 +1876,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
                 CTxOut prevoutput = tx_in->vout[in.prevout.n];
 
                 tx_total_in += prevoutput.nValue;
-                utxo_size_inc -= GetSerializeSize(prevoutput, SER_NETWORK, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
+                utxo_size_inc -= GetSerializeSize(prevoutput, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
             }
 
             CAmount txfee = tx_total_in - tx_total_out;
@@ -1847,12 +1890,20 @@ static UniValue getblockstats(const JSONRPCRequest& request)
 
             // New feerate uses satoshis per virtual byte instead of per serialized byte
             CAmount feerate = weight ? (txfee * WITNESS_SCALE_FACTOR) / weight : 0;
-            if (do_medianfeerate) {
-                feerate_array.push_back(feerate);
+            if (do_feerate_percentiles) {
+                feerate_array.emplace_back(std::make_pair(feerate, weight));
             }
             maxfeerate = std::max(maxfeerate, feerate);
             minfeerate = std::min(minfeerate, feerate);
         }
+    }
+
+    CAmount feerate_percentiles[NUM_GETBLOCKSTATS_PERCENTILES] = { 0 };
+    CalculatePercentilesByWeight(feerate_percentiles, feerate_array, total_weight);
+
+    UniValue feerates_res(UniValue::VARR);
+    for (int64_t i = 0; i < NUM_GETBLOCKSTATS_PERCENTILES; i++) {
+        feerates_res.push_back(feerate_percentiles[i]);
     }
 
     UniValue ret_all(UniValue::VOBJ);
@@ -1860,13 +1911,13 @@ static UniValue getblockstats(const JSONRPCRequest& request)
     ret_all.pushKV("avgfeerate", total_weight ? (totalfee * WITNESS_SCALE_FACTOR) / total_weight : 0); // Unit: sat/vbyte
     ret_all.pushKV("avgtxsize", (block.vtx.size() > 1) ? total_size / (block.vtx.size() - 1) : 0);
     ret_all.pushKV("blockhash", pindex->GetBlockHash().GetHex());
+    ret_all.pushKV("feerate_percentiles", feerates_res);
     ret_all.pushKV("height", (int64_t)pindex->nHeight);
     ret_all.pushKV("ins", inputs);
     ret_all.pushKV("maxfee", maxfee);
     ret_all.pushKV("maxfeerate", maxfeerate);
     ret_all.pushKV("maxtxsize", maxtxsize);
     ret_all.pushKV("medianfee", CalculateTruncatedMedian(fee_array));
-    ret_all.pushKV("medianfeerate", CalculateTruncatedMedian(feerate_array));
     ret_all.pushKV("mediantime", pindex->GetMedianTimePast());
     ret_all.pushKV("mediantxsize", CalculateTruncatedMedian(txsize_array));
     ret_all.pushKV("minfee", (minfee == MAX_MONEY) ? 0 : minfee);
@@ -1984,67 +2035,38 @@ public:
     }
 };
 
-static const char *g_default_scantxoutset_script_types[] = { "P2PKH", "P2SH_P2WPKH", "P2WPKH" };
-
-enum class OutputScriptType {
-    UNKNOWN,
-    P2PK,
-    P2PKH,
-    P2SH_P2WPKH,
-    P2WPKH
-};
-
-static inline OutputScriptType GetOutputScriptTypeFromString(const std::string& outputtype)
-{
-    if (outputtype == "P2PK") return OutputScriptType::P2PK;
-    else if (outputtype == "P2PKH") return OutputScriptType::P2PKH;
-    else if (outputtype == "P2SH_P2WPKH") return OutputScriptType::P2SH_P2WPKH;
-    else if (outputtype == "P2WPKH") return OutputScriptType::P2WPKH;
-    else return OutputScriptType::UNKNOWN;
-}
-
-CTxDestination GetDestinationForKey(const CPubKey& key, OutputScriptType type)
-{
-    switch (type) {
-    case OutputScriptType::P2PKH: return key.GetID();
-    case OutputScriptType::P2SH_P2WPKH:
-    case OutputScriptType::P2WPKH: {
-        if (!key.IsCompressed()) return key.GetID();
-        CTxDestination witdest = WitnessV0KeyHash(key.GetID());
-        if (type == OutputScriptType::P2SH_P2WPKH) {
-            CScript witprog = GetScriptForDestination(witdest);
-            return CScriptID(witprog);
-        } else {
-            return witdest;
-        }
-    }
-    default: assert(false);
-    }
-}
-
 UniValue scantxoutset(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() < 1 || request.params.size() > 2)
         throw std::runtime_error(
             "scantxoutset <action> ( <scanobjects> )\n"
-            "\nScans the unspent transaction output set for possible entries that matches common scripts of given public keys.\n"
-            "Using addresses as scanobjects will _not_ detect unspent P2PK txouts\n"
+            "\nEXPERIMENTAL warning: this call may be removed or changed in future releases.\n"
+            "\nScans the unspent transaction output set for entries that match certain output descriptors.\n"
+            "Examples of output descriptors are:\n"
+            "    addr(<address>)                      Outputs whose scriptPubKey corresponds to the specified address (does not include P2PK)\n"
+            "    raw(<hex script>)                    Outputs whose scriptPubKey equals the specified hex scripts\n"
+            "    combo(<pubkey>)                      P2PK, P2PKH, P2WPKH, and P2SH-P2WPKH outputs for the given pubkey\n"
+            "    pkh(<pubkey>)                        P2PKH outputs for the given pubkey\n"
+            "    sh(multi(<n>,<pubkey>,<pubkey>,...)) P2SH-multisig outputs for the given threshold and pubkeys\n"
+            "\nIn the above, <pubkey> either refers to a fixed public key in hexadecimal notation, or to an xpub/xprv optionally followed by one\n"
+            "or more path elements separated by \"/\", and optionally ending in \"/*\" (unhardened), or \"/*'\" or \"/*h\" (hardened) to specify all\n"
+            "unhardened or hardened child keys.\n"
+            "In the latter case, a range needs to be specified by below if different from 1000.\n"
+            "For more information on output descriptors, see the documentation in the doc/descriptors.md file.\n"
             "\nArguments:\n"
             "1. \"action\"                       (string, required) The action to execute\n"
             "                                      \"start\" for starting a scan\n"
             "                                      \"abort\" for aborting the current scan (returns true when abort was successful)\n"
             "                                      \"status\" for progress report (in %) of the current scan\n"
-            "2. \"scanobjects\"                  (array, optional) Array of scan objects (only one object type per scan object allowed)\n"
-            "      [\n"
-            "        { \"address\" : \"<address>\" },       (string, optional) Bitcoin address\n"
-            "        { \"script\"  : \"<scriptPubKey>\" },  (string, optional) HEX encoded script (scriptPubKey)\n"
-            "        { \"pubkey\"  :                      (object, optional) Public key\n"
-            "          {\n"
-            "            \"pubkey\" : \"<pubkey\">,         (string, required) HEX encoded public key\n"
-            "            \"script_types\" : [ ... ],      (array, optional) Array of script-types to derive from the pubkey (possible values: \"P2PK\", \"P2PKH\", \"P2SH-P2WPKH\", \"P2WPKH\")\n"
-            "          }\n"
+            "2. \"scanobjects\"                  (array, required) Array of scan objects\n"
+            "    [                             Every scan object is either a string descriptor or an object:\n"
+            "        \"descriptor\",             (string, optional) An output descriptor\n"
+            "        {                         (object, optional) An object with output descriptor and metadata\n"
+            "          \"desc\": \"descriptor\",   (string, required) An output descriptor\n"
+            "          \"range\": n,             (numeric, optional) Up to what child index HD chains should be explored (default: 1000)\n"
             "        },\n"
-            "      ]\n"
+            "        ...\n"
+            "    ]\n"
             "\nResult:\n"
             "{\n"
             "  \"unspents\": [\n"
@@ -2090,79 +2112,35 @@ UniValue scantxoutset(const JSONRPCRequest& request)
 
         // loop through the scan objects
         for (const UniValue& scanobject : request.params[1].get_array().getValues()) {
-            if (!scanobject.isObject()) {
-                throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid scan object");
+            std::string desc_str;
+            int range = 1000;
+            if (scanobject.isStr()) {
+                desc_str = scanobject.get_str();
+            } else if (scanobject.isObject()) {
+                UniValue desc_uni = find_value(scanobject, "desc");
+                if (desc_uni.isNull()) throw JSONRPCError(RPC_INVALID_PARAMETER, "Descriptor needs to be provided in scan object");
+                desc_str = desc_uni.get_str();
+                UniValue range_uni = find_value(scanobject, "range");
+                if (!range_uni.isNull()) {
+                    range = range_uni.get_int();
+                    if (range < 0 || range > 1000000) throw JSONRPCError(RPC_INVALID_PARAMETER, "range out of range");
+                }
+            } else {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "Scan object needs to be either a string or an object");
             }
-            UniValue address_uni = find_value(scanobject, "address");
-            UniValue pubkey_uni  = find_value(scanobject, "pubkey");
-            UniValue script_uni  = find_value(scanobject, "script");
 
-            // make sure only one object type is present
-            if (1 != !address_uni.isNull() + !pubkey_uni.isNull() + !script_uni.isNull()) {
-                throw JSONRPCError(RPC_INVALID_PARAMETER, "Only one object type is allowed per scan object");
-            } else if (!address_uni.isNull() && !address_uni.isStr()) {
-                throw JSONRPCError(RPC_INVALID_PARAMETER, "Scanobject \"address\" must contain a single string as value");
-            } else if (!pubkey_uni.isNull() && !pubkey_uni.isObject()) {
-                throw JSONRPCError(RPC_INVALID_PARAMETER, "Scanobject \"pubkey\" must contain an object as value");
-            } else if (!script_uni.isNull() && !script_uni.isStr()) {
-                throw JSONRPCError(RPC_INVALID_PARAMETER, "Scanobject \"script\" must contain a single string as value");
-            } else if (address_uni.isStr()) {
-                // type: address
-                // decode destination and derive the scriptPubKey
-                // add the script to the scan containers
-                CTxDestination dest = DecodeDestination(address_uni.get_str());
-                if (!IsValidDestination(dest)) {
-                    throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
+            FlatSigningProvider provider;
+            auto desc = Parse(desc_str, provider);
+            if (!desc) {
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("Invalid descriptor '%s'", desc_str));
+            }
+            if (!desc->IsRange()) range = 0;
+            for (int i = 0; i <= range; ++i) {
+                std::vector<CScript> scripts;
+                if (!desc->Expand(i, provider, scripts, provider)) {
+                    throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("Cannot derive script without private keys: '%s'", desc_str));
                 }
-                CScript script = GetScriptForDestination(dest);
-                assert(!script.empty());
-                needles.insert(script);
-            } else if (pubkey_uni.isObject()) {
-                // type: pubkey
-                // derive script(s) according to the script_type parameter
-                UniValue script_types_uni = find_value(pubkey_uni, "script_types");
-                UniValue pubkeydata_uni = find_value(pubkey_uni, "pubkey");
-
-                // check the script types and use the default if not provided
-                if (!script_types_uni.isNull() && !script_types_uni.isArray()) {
-                    throw JSONRPCError(RPC_INVALID_PARAMETER, "script_types must be an array");
-                } else if (script_types_uni.isNull()) {
-                    // use the default script types
-                    script_types_uni = UniValue(UniValue::VARR);
-                    for (const char *t : g_default_scantxoutset_script_types) {
-                        script_types_uni.push_back(t);
-                    }
-                }
-
-                // check the acctual pubkey
-                if (!pubkeydata_uni.isStr() || !IsHex(pubkeydata_uni.get_str())) {
-                    throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Public key must be hex encoded");
-                }
-                CPubKey pubkey(ParseHexV(pubkeydata_uni, "pubkey"));
-                if (!pubkey.IsFullyValid()) {
-                    throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid public key");
-                }
-
-                // loop through the script types and derive the script
-                for (const UniValue& script_type_uni : script_types_uni.get_array().getValues()) {
-                    OutputScriptType script_type = GetOutputScriptTypeFromString(script_type_uni.get_str());
-                    if (script_type == OutputScriptType::UNKNOWN) throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid script type");
-                    CScript script;
-                    if (script_type == OutputScriptType::P2PK) {
-                        // support legacy P2PK scripts
-                        script << ToByteVector(pubkey) << OP_CHECKSIG;
-                    } else {
-                        script = GetScriptForDestination(GetDestinationForKey(pubkey, script_type));
-                    }
-                    assert(!script.empty());
-                    needles.insert(script);
-                }
-            } else if (script_uni.isStr()) {
-                // type: script
-                // check and add the script to the scan containers (needles array)
-                CScript script(ParseHexV(script_uni, "script"));
-                // TODO: check script: max length, has OP, is unspenable etc.
-                needles.insert(script);
+                needles.insert(scripts.begin(), scripts.end());
             }
         }
 
@@ -2208,6 +2186,7 @@ UniValue scantxoutset(const JSONRPCRequest& request)
     return result;
 }
 
+// clang-format off
 static const CRPCCommand commands[] =
 { //  category              name                      actor (function)         argNames
   //  --------------------- ------------------------  -----------------------  ----------
@@ -2243,6 +2222,7 @@ static const CRPCCommand commands[] =
     { "hidden",             "waitforblockheight",     &waitforblockheight,     {"height","timeout"} },
     { "hidden",             "syncwithvalidationinterfacequeue", &syncwithvalidationinterfacequeue, {} },
 };
+// clang-format on
 
 void RegisterBlockchainRPCCommands(CRPCTable &t)
 {

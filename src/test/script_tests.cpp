@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2018 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -369,7 +369,7 @@ public:
         std::vector<unsigned char> vchSig, r, s;
         uint32_t iter = 0;
         do {
-            key.Sign(hash, vchSig, iter++);
+            key.Sign(hash, vchSig, false, iter++);
             if ((lenS == 33) != (vchSig[5 + vchSig[3]] == 33)) {
                 NegateSignatureS(vchSig);
             }
@@ -515,7 +515,7 @@ BOOST_AUTO_TEST_CASE(script_build)
     tests.push_back(TestBuilder(CScript() << ToByteVector(keys.pubkey0C) << OP_CHECKSIG,
                                 "P2SH(P2PK), bad redeemscript", SCRIPT_VERIFY_P2SH, true
                                ).PushSig(keys.key0).PushRedeem().DamagePush(10).ScriptError(SCRIPT_ERR_EVAL_FALSE));
-    
+
     tests.push_back(TestBuilder(CScript() << OP_DUP << OP_HASH160 << ToByteVector(keys.pubkey0.GetID()) << OP_EQUALVERIFY << OP_CHECKSIG,
                                 "P2SH(P2PKH)", SCRIPT_VERIFY_P2SH, true
                                ).PushSig(keys.key0).Push(keys.pubkey0).PushRedeem());
@@ -937,17 +937,19 @@ BOOST_AUTO_TEST_CASE(script_build)
         }
     }
 
+#ifdef UPDATE_JSON_TESTS
     std::string strGen;
-
+#endif
     for (TestBuilder& test : tests) {
         test.Test();
         std::string str = JSONPrettyPrint(test.GetJSON());
-#ifndef UPDATE_JSON_TESTS
+#ifdef UPDATE_JSON_TESTS
+        strGen += str + ",\n";
+#else
         if (tests_set.count(str) == 0) {
             BOOST_CHECK_MESSAGE(false, "Missing auto script_valid test: " + test.GetComment());
         }
 #endif
-        strGen += str + ",\n";
     }
 
 #ifdef UPDATE_JSON_TESTS
@@ -1011,21 +1013,21 @@ BOOST_AUTO_TEST_CASE(script_PushData)
 
     ScriptError err;
     std::vector<std::vector<unsigned char> > directStack;
-    BOOST_CHECK(EvalScript(directStack, CScript(&direct[0], &direct[sizeof(direct)]), SCRIPT_VERIFY_P2SH, BaseSignatureChecker(), SigVersion::BASE, &err));
+    BOOST_CHECK(EvalScript(directStack, CScript(direct, direct + sizeof(direct)), SCRIPT_VERIFY_P2SH, BaseSignatureChecker(), SigVersion::BASE, &err));
     BOOST_CHECK_MESSAGE(err == SCRIPT_ERR_OK, ScriptErrorString(err));
 
     std::vector<std::vector<unsigned char> > pushdata1Stack;
-    BOOST_CHECK(EvalScript(pushdata1Stack, CScript(&pushdata1[0], &pushdata1[sizeof(pushdata1)]), SCRIPT_VERIFY_P2SH, BaseSignatureChecker(), SigVersion::BASE, &err));
+    BOOST_CHECK(EvalScript(pushdata1Stack, CScript(pushdata1, pushdata1 + sizeof(pushdata1)), SCRIPT_VERIFY_P2SH, BaseSignatureChecker(), SigVersion::BASE, &err));
     BOOST_CHECK(pushdata1Stack == directStack);
     BOOST_CHECK_MESSAGE(err == SCRIPT_ERR_OK, ScriptErrorString(err));
 
     std::vector<std::vector<unsigned char> > pushdata2Stack;
-    BOOST_CHECK(EvalScript(pushdata2Stack, CScript(&pushdata2[0], &pushdata2[sizeof(pushdata2)]), SCRIPT_VERIFY_P2SH, BaseSignatureChecker(), SigVersion::BASE, &err));
+    BOOST_CHECK(EvalScript(pushdata2Stack, CScript(pushdata2, pushdata2 + sizeof(pushdata2)), SCRIPT_VERIFY_P2SH, BaseSignatureChecker(), SigVersion::BASE, &err));
     BOOST_CHECK(pushdata2Stack == directStack);
     BOOST_CHECK_MESSAGE(err == SCRIPT_ERR_OK, ScriptErrorString(err));
 
     std::vector<std::vector<unsigned char> > pushdata4Stack;
-    BOOST_CHECK(EvalScript(pushdata4Stack, CScript(&pushdata4[0], &pushdata4[sizeof(pushdata4)]), SCRIPT_VERIFY_P2SH, BaseSignatureChecker(), SigVersion::BASE, &err));
+    BOOST_CHECK(EvalScript(pushdata4Stack, CScript(pushdata4, pushdata4 + sizeof(pushdata4)), SCRIPT_VERIFY_P2SH, BaseSignatureChecker(), SigVersion::BASE, &err));
     BOOST_CHECK(pushdata4Stack == directStack);
     BOOST_CHECK_MESSAGE(err == SCRIPT_ERR_OK, ScriptErrorString(err));
 }
