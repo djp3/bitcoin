@@ -1,11 +1,10 @@
-// Copyright (c) 2017-2018 The Bitcoin Core developers
+// Copyright (c) 2017-2019 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <key_io.h>
 #include <keystore.h>
 #include <policy/fees.h>
-#include <rpc/protocol.h>
 #include <rpc/util.h>
 #include <tinyformat.h>
 #include <util/strencodings.h>
@@ -139,6 +138,34 @@ unsigned int ParseConfirmTarget(const UniValue& value)
         throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Invalid conf_target, must be between %u - %u", 1, max_target));
     }
     return (unsigned int)target;
+}
+
+RPCErrorCode RPCErrorFromTransactionError(TransactionError terr)
+{
+    switch (terr) {
+        case TransactionError::MEMPOOL_REJECTED:
+            return RPC_TRANSACTION_REJECTED;
+        case TransactionError::ALREADY_IN_CHAIN:
+            return RPC_TRANSACTION_ALREADY_IN_CHAIN;
+        case TransactionError::P2P_DISABLED:
+            return RPC_CLIENT_P2P_DISABLED;
+        case TransactionError::INVALID_PSBT:
+        case TransactionError::PSBT_MISMATCH:
+            return RPC_INVALID_PARAMETER;
+        case TransactionError::SIGHASH_MISMATCH:
+            return RPC_DESERIALIZATION_ERROR;
+        default: break;
+    }
+    return RPC_TRANSACTION_ERROR;
+}
+
+UniValue JSONRPCTransactionError(TransactionError terr, const std::string& err_string)
+{
+    if (err_string.length() > 0) {
+        return JSONRPCError(RPCErrorFromTransactionError(terr), err_string);
+    } else {
+        return JSONRPCError(RPCErrorFromTransactionError(terr), TransactionErrorString(terr));
+    }
 }
 
 struct Section {
@@ -287,6 +314,17 @@ std::string RPCExamples::ToDescriptionString() const
     return m_examples.empty() ? m_examples : "\nExamples:\n" + m_examples;
 }
 
+bool RPCHelpMan::IsValidNumArgs(size_t num_args) const
+{
+    size_t num_required_args = 0;
+    for (size_t n = m_args.size(); n > 0; --n) {
+        if (!m_args.at(n - 1).IsOptional()) {
+            num_required_args = n;
+            break;
+        }
+    }
+    return num_required_args <= num_args && num_args <= m_args.size();
+}
 std::string RPCHelpMan::ToString() const
 {
     std::string ret;
@@ -295,12 +333,7 @@ std::string RPCHelpMan::ToString() const
     ret += m_name;
     bool was_optional{false};
     for (const auto& arg : m_args) {
-        bool optional;
-        if (arg.m_fallback.which() == 1) {
-            optional = true;
-        } else {
-            optional = RPCArg::Optional::NO != boost::get<RPCArg::Optional>(arg.m_fallback);
-        }
+        const bool optional = arg.IsOptional();
         ret += " ";
         if (optional) {
             if (!was_optional) ret += "( ";
@@ -340,6 +373,15 @@ std::string RPCHelpMan::ToString() const
     ret += m_examples.ToDescriptionString();
 
     return ret;
+}
+
+bool RPCArg::IsOptional() const
+{
+    if (m_fallback.which() == 1) {
+        return true;
+    } else {
+        return RPCArg::Optional::NO != boost::get<RPCArg::Optional>(m_fallback);
+    }
 }
 
 std::string RPCArg::ToDescriptionString() const
