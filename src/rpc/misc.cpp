@@ -20,6 +20,7 @@
 #include <timedata.h>
 #include <util/system.h>
 #include <util/strencodings.h>
+#include <util/validation.h>
 #include <warnings.h>
 
 #include <stdint.h>
@@ -34,11 +35,7 @@ static UniValue validateaddress(const JSONRPCRequest& request)
     if (request.fHelp || request.params.size() != 1)
         throw std::runtime_error(
             RPCHelpMan{"validateaddress",
-                "\nReturn information about the given bitcoin address.\n"
-                "DEPRECATION WARNING: Parts of this command have been deprecated and moved to getaddressinfo. Clients must\n"
-                "transition to using getaddressinfo to access this information before upgrading to v0.18. The following deprecated\n"
-                "fields have moved to getaddressinfo and will only be shown here with -deprecatedrpc=validateaddress: ismine, iswatchonly,\n"
-                "script, hex, pubkeys, sigsrequired, pubkey, addresses, embedded, iscompressed, account, timestamp, hdkeypath, kdmasterkeyid.\n",
+                "\nReturn information about the given bitcoin address.\n",
                 {
                     {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The bitcoin address to validate"},
                 },
@@ -232,8 +229,8 @@ UniValue deriveaddresses(const JSONRPCRequest& request)
         range_end = range.second;
     }
 
-    FlatSigningProvider provider;
-    auto desc = Parse(desc_str, provider, /* require_checksum = */ true);
+    FlatSigningProvider key_provider;
+    auto desc = Parse(desc_str, key_provider, /* require_checksum = */ true);
     if (!desc) {
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("Invalid descriptor"));
     }
@@ -249,8 +246,9 @@ UniValue deriveaddresses(const JSONRPCRequest& request)
     UniValue addresses(UniValue::VARR);
 
     for (int i = range_begin; i <= range_end; ++i) {
+        FlatSigningProvider provider;
         std::vector<CScript> scripts;
-        if (!desc->Expand(i, provider, scripts, provider)) {
+        if (!desc->Expand(i, key_provider, scripts, provider)) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("Cannot derive script without private keys"));
         }
 

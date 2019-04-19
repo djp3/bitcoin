@@ -323,12 +323,14 @@ def get_auth_cookie(datadir):
                 if line.startswith("rpcpassword="):
                     assert password is None  # Ensure that there is only one rpcpassword line
                     password = line.split("=")[1].strip("\n")
-    if os.path.isfile(os.path.join(datadir, "regtest", ".cookie")) and os.access(os.path.join(datadir, "regtest", ".cookie"), os.R_OK):
+    try:
         with open(os.path.join(datadir, "regtest", ".cookie"), 'r', encoding="ascii") as f:
             userpass = f.read()
             split_userpass = userpass.split(':')
             user = split_userpass[0]
             password = split_userpass[1]
+    except OSError:
+        pass
     if user is None or password is None:
         raise ValueError("No RPC credentials")
     return user, password
@@ -467,7 +469,7 @@ def random_transaction(nodes, amount, min_fee, fee_increment, fee_variants):
 
     rawtx = from_node.createrawtransaction(inputs, outputs)
     signresult = from_node.signrawtransactionwithwallet(rawtx)
-    txid = from_node.sendrawtransaction(signresult["hex"], True)
+    txid = from_node.sendrawtransaction(signresult["hex"], 0)
 
     return (txid, signresult["hex"], fee)
 
@@ -539,7 +541,7 @@ def create_lots_of_big_transactions(node, txouts, utxos, num, fee):
         newtx = newtx + txouts
         newtx = newtx + rawtx[94:]
         signresult = node.signrawtransactionwithwallet(newtx, None, "NONE")
-        txid = node.sendrawtransaction(signresult["hex"], True)
+        txid = node.sendrawtransaction(signresult["hex"], 0)
         txids.append(txid)
     return txids
 
