@@ -9,7 +9,7 @@ import struct
 import time
 
 from test_framework.blocktools import create_block, create_coinbase, add_witness_commitment, get_witness_script, WITNESS_COMMITMENT_HEADER
-from test_framework.key import CECKey, CPubKey
+from test_framework.key import ECKey
 from test_framework.messages import (
     BIP125_SEQUENCE_NUMBER,
     CBlock,
@@ -36,6 +36,7 @@ from test_framework.messages import (
     ser_vector,
     sha256,
     uint256_from_str,
+    FromHex,
 )
 from test_framework.mininode import (
     P2PInterface,
@@ -77,6 +78,7 @@ from test_framework.util import (
     disconnect_nodes,
     get_bip9_status,
     hex_str_to_bytes,
+    assert_raises_rpc_error,
 )
 
 # The versionbit bit used to signal activation of SegWit
@@ -100,7 +102,7 @@ def get_p2pkh_script(pubkeyhash):
 def sign_p2pk_witness_input(script, tx_to, in_idx, hashtype, value, key):
     """Add signature for a P2PK witness program."""
     tx_hash = SegwitVersion1SignatureHash(script, tx_to, in_idx, hashtype, value)
-    signature = key.sign(tx_hash) + chr(hashtype).encode('latin-1')
+    signature = key.sign_ecdsa(tx_hash) + chr(hashtype).encode('latin-1')
     tx_to.wit.vtxinwit[in_idx].scriptWitness.stack = [signature, script]
     tx_to.rehash()
 
@@ -269,6 +271,7 @@ class SegWitTest(BitcoinTestFramework):
         self.test_non_standard_witness()
         self.test_upgrade_after_activation()
         self.test_witness_sigops()
+        self.test_superfluous_witness()
 
     # Individual tests
 
@@ -1357,7 +1360,8 @@ class SegWitTest(BitcoinTestFramework):
     def test_segwit_versions(self):
         """Test validity of future segwit version transactions.
 
-        Future segwit version transactions are non-standard, but valid in blocks.
+        Future segwit versions are non-standard to spend, but valid in blocks.
+        Sending to future segwit versions is always allowed.
         Can run this before and after segwit activation."""
 
         NUM_SEGWIT_VERSIONS = 17  # will test OP_0, OP1, ..., OP_16
@@ -1397,7 +1401,7 @@ class SegWitTest(BitcoinTestFramework):
         assert len(self.nodes[0].getrawmempool()) == 0
 
         # Finally, verify that version 0 -> version 1 transactions
-        # are non-standard
+        # are standard
         script_pubkey = CScript([CScriptOp(OP_1), witness_hash])
         tx2 = CTransaction()
         tx2.vin = [CTxIn(COutPoint(tx.sha256, 0), b"")]
@@ -1405,10 +1409,9 @@ class SegWitTest(BitcoinTestFramework):
         tx2.wit.vtxinwit.append(CTxInWitness())
         tx2.wit.vtxinwit[0].scriptWitness.stack = [witness_program]
         tx2.rehash()
-        # Gets accepted to test_node, because standardness of outputs isn't
-        # checked with fRequireStandard
+        # Gets accepted to both policy-enforcing nodes and others.
         test_transaction_acceptance(self.nodes[0], self.test_node, tx2, with_witness=True, accepted=True)
-        test_transaction_acceptance(self.nodes[1], self.std_node, tx2, with_witness=True, accepted=False)
+        test_transaction_acceptance(self.nodes[1], self.std_node, tx2, with_witness=True, accepted=True)
         temp_utxo.pop()  # last entry in temp_utxo was the output we just spent
         temp_utxo.append(UTXO(tx2.sha256, 0, tx2.vout[0].nValue))
 
@@ -1479,10 +1482,9 @@ class SegWitTest(BitcoinTestFramework):
 
         # Segwit transactions using uncompressed pubkeys are not accepted
         # under default policy, but should still pass consensus.
-        key = CECKey()
-        key.set_secretbytes(b"9")
-        key.set_compressed(False)
-        pubkey = CPubKey(key.get_pubkey())
+        key = ECKey()
+        key.generate(False)
+        pubkey = key.get_pubkey().get_bytes()
         assert_equal(len(pubkey), 65)  # This should be an uncompressed pubkey
 
         utxo = self.utxo.pop(0)
@@ -1512,7 +1514,7 @@ class SegWitTest(BitcoinTestFramework):
         tx2.vout.append(CTxOut(tx.vout[0].nValue - 1000, script_wsh))
         script = get_p2pkh_script(pubkeyhash)
         sig_hash = SegwitVersion1SignatureHash(script, tx2, 0, SIGHASH_ALL, tx.vout[0].nValue)
-        signature = key.sign(sig_hash) + b'\x01'  # 0x1 is SIGHASH_ALL
+        signature = key.sign_ecdsa(sig_hash) + b'\x01'  # 0x1 is SIGHASH_ALL
         tx2.wit.vtxinwit.append(CTxInWitness())
         tx2.wit.vtxinwit[0].scriptWitness.stack = [signature, pubkey]
         tx2.rehash()
@@ -1566,7 +1568,7 @@ class SegWitTest(BitcoinTestFramework):
         tx5.vin.append(CTxIn(COutPoint(tx4.sha256, 0), b""))
         tx5.vout.append(CTxOut(tx4.vout[0].nValue - 1000, CScript([OP_TRUE])))
         (sig_hash, err) = SignatureHash(script_pubkey, tx5, 0, SIGHASH_ALL)
-        signature = key.sign(sig_hash) + b'\x01'  # 0x1 is SIGHASH_ALL
+        signature = key.sign_ecdsa(sig_hash) + b'\x01'  # 0x1 is SIGHASH_ALL
         tx5.vin[0].scriptSig = CScript([signature, pubkey])
         tx5.rehash()
         # Should pass policy and consensus.
@@ -1579,9 +1581,9 @@ class SegWitTest(BitcoinTestFramework):
     @subtest
     def test_signature_version_1(self):
 
-        key = CECKey()
-        key.set_secretbytes(b"9")
-        pubkey = CPubKey(key.get_pubkey())
+        key = ECKey()
+        key.generate()
+        pubkey = key.get_pubkey().get_bytes()
 
         witness_program = CScript([pubkey, CScriptOp(OP_CHECKSIG)])
         witness_hash = sha256(witness_program)
@@ -1716,7 +1718,7 @@ class SegWitTest(BitcoinTestFramework):
 
         script = get_p2pkh_script(pubkeyhash)
         sig_hash = SegwitVersion1SignatureHash(script, tx2, 0, SIGHASH_ALL, tx.vout[0].nValue)
-        signature = key.sign(sig_hash) + b'\x01'  # 0x1 is SIGHASH_ALL
+        signature = key.sign_ecdsa(sig_hash) + b'\x01'  # 0x1 is SIGHASH_ALL
 
         # Check that we can't have a scriptSig
         tx2.vin[0].scriptSig = CScript([signature, pubkey])
@@ -2034,6 +2036,32 @@ class SegWitTest(BitcoinTestFramework):
         test_witness_block(self.nodes[0], self.test_node, block_5, accepted=True)
 
         # TODO: test p2sh sigop counting
+
+    def test_superfluous_witness(self):
+        # Serialization of tx that puts witness flag to 1 always
+        def serialize_with_bogus_witness(tx):
+            flags = 1
+            r = b""
+            r += struct.pack("<i", tx.nVersion)
+            if flags:
+                dummy = []
+                r += ser_vector(dummy)
+                r += struct.pack("<B", flags)
+            r += ser_vector(tx.vin)
+            r += ser_vector(tx.vout)
+            if flags & 1:
+                if (len(tx.wit.vtxinwit) != len(tx.vin)):
+                    # vtxinwit must have the same length as vin
+                    tx.wit.vtxinwit = tx.wit.vtxinwit[:len(tx.vin)]
+                    for i in range(len(tx.wit.vtxinwit), len(tx.vin)):
+                        tx.wit.vtxinwit.append(CTxInWitness())
+                r += tx.wit.serialize()
+            r += struct.pack("<I", tx.nLockTime)
+            return r
+
+        raw = self.nodes[0].createrawtransaction([{"txid":"00"*32, "vout":0}], {self.nodes[0].getnewaddress():1})
+        tx = FromHex(CTransaction(), raw)
+        assert_raises_rpc_error(-22, "TX decode failed", self.nodes[0].decoderawtransaction, serialize_with_bogus_witness(tx).hex())
 
 if __name__ == '__main__':
     SegWitTest().main()
