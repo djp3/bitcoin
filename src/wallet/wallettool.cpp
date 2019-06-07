@@ -1,8 +1,7 @@
-// Copyright (c) 2016-2018 The Bitcoin Core developers
+// Copyright (c) 2016-2019 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <base58.h>
 #include <fs.h>
 #include <util/system.h>
 #include <wallet/wallet.h>
@@ -59,7 +58,7 @@ static std::shared_ptr<CWallet> LoadWallet(const std::string& name, const fs::pa
     try {
         bool first_run;
         load_wallet_ret = wallet_instance->LoadWallet(first_run);
-    } catch (const std::runtime_error) {
+    } catch (const std::runtime_error&) {
         fprintf(stderr, "Error loading %s. Is wallet being used by another process?\n", name.c_str());
         return nullptr;
     }

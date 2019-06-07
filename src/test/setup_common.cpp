@@ -18,7 +18,6 @@
 #include <rpc/server.h>
 #include <script/sigcache.h>
 #include <streams.h>
-#include <ui_interface.h>
 #include <util/validation.h>
 #include <validation.h>
 
@@ -151,7 +150,7 @@ TestChain100Setup::CreateAndProcessBlock(const std::vector<CMutableTransaction>&
     {
         LOCK(cs_main);
         unsigned int extraNonce = 0;
-        IncrementExtraNonce(&block, chainActive.Tip(), extraNonce);
+        IncrementExtraNonce(&block, ::ChainActive().Tip(), extraNonce);
     }
 
     while (!CheckProofOfWork(block.GetHash(), block.nBits, chainparams.GetConsensus())) ++block.nNonce;

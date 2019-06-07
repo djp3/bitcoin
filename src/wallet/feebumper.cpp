@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 The Bitcoin Core developers
+// Copyright (c) 2017-2019 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -10,14 +10,10 @@
 #include <wallet/wallet.h>
 #include <policy/fees.h>
 #include <policy/policy.h>
-#include <policy/rbf.h>
-#include <validation.h> //for mempool access
-#include <txmempool.h>
 #include <util/moneystr.h>
 #include <util/rbf.h>
 #include <util/system.h>
 #include <util/validation.h>
-#include <net.h>
 
 //! Check whether transaction has descendant in wallet or mempool, or has been
 //! mined, or conflicts with a mined transaction. Return a feebumper::Result.
