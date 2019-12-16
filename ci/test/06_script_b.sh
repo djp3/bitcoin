@@ -6,11 +6,29 @@
 
 export LC_ALL=C.UTF-8
 
-cd "build/bitcoin-$HOST" || (echo "could not enter distdir build/bitcoin-$HOST"; exit 1)
+if [ -n "$QEMU_USER_CMD" ]; then
+  BEGIN_FOLD wrap-qemu
+  echo "Prepare to run functional tests for HOST=$HOST"
+  # Generate all binaries, so that they can be wrapped
+  DOCKER_EXEC make $MAKEJOBS -C src/secp256k1 VERBOSE=1
+  DOCKER_EXEC make $MAKEJOBS -C src/univalue VERBOSE=1
+  for b_name in {"${BASE_OUTDIR}/bin"/*,src/secp256k1/*tests,src/univalue/{no_nul,test_json,unitester,object}}; do
+    # shellcheck disable=SC2044
+    for b in $(find "${BASE_ROOT_DIR}" -executable -type f -name $(basename $b_name)); do
+      echo "Wrap $b ..."
+      DOCKER_EXEC mv "$b" "${b}_orig"
+      DOCKER_EXEC echo "\#\!/usr/bin/env bash" \> "$b"
+      DOCKER_EXEC echo "$QEMU_USER_CMD \\\"${b}_orig\\\" \\\"\\\$@\\\"" \>\> "$b"
+      DOCKER_EXEC chmod +x "$b"
+    done
+  done
+  END_FOLD
+fi
 
 if [ "$RUN_UNIT_TESTS" = "true" ]; then
   BEGIN_FOLD unit-tests
-  DOCKER_EXEC LD_LIBRARY_PATH=$BASE_BUILD_DIR/depends/$HOST/lib make $MAKEJOBS check VERBOSE=1
+  bash -c "${CI_WAIT}" &  # Print dots in case the unit tests take a long time to run
+  DOCKER_EXEC LD_LIBRARY_PATH=$DEPENDS_DIR/$HOST/lib make $MAKEJOBS check VERBOSE=1
   END_FOLD
 fi
 
@@ -25,5 +43,3 @@ if [ "$RUN_FUZZ_TESTS" = "true" ]; then
   DOCKER_EXEC test/fuzz/test_runner.py -l DEBUG ${DIR_FUZZ_IN}
   END_FOLD
 fi
-
-cd ${BASE_BUILD_DIR} || (echo "could not enter travis build dir $BASE_BUILD_DIR"; exit 1)
