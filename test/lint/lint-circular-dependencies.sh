@@ -18,18 +18,14 @@ EXPECTED_CIRCULAR_DEPENDENCIES=(
     "qt/bitcoingui -> qt/walletframe -> qt/bitcoingui"
     "qt/bitcoingui -> qt/walletview -> qt/bitcoingui"
     "qt/clientmodel -> qt/peertablemodel -> qt/clientmodel"
-    "qt/paymentserver -> qt/walletmodel -> qt/paymentserver"
     "qt/recentrequeststablemodel -> qt/walletmodel -> qt/recentrequeststablemodel"
     "qt/sendcoinsdialog -> qt/walletmodel -> qt/sendcoinsdialog"
     "qt/transactiontablemodel -> qt/walletmodel -> qt/transactiontablemodel"
-    "qt/walletmodel -> qt/walletmodeltransaction -> qt/walletmodel"
     "txmempool -> validation -> txmempool"
-    "wallet/coincontrol -> wallet/wallet -> wallet/coincontrol"
     "wallet/fees -> wallet/wallet -> wallet/fees"
     "wallet/wallet -> wallet/walletdb -> wallet/wallet"
     "policy/fees -> txmempool -> validation -> policy/fees"
-    "qt/guiutil -> qt/walletmodel -> qt/optionsmodel -> qt/guiutil"
-    "txmempool -> validation -> validationinterface -> txmempool"
+    "wallet/scriptpubkeyman -> wallet/wallet -> wallet/scriptpubkeyman"
 )
 
 EXIT_CODE=0
@@ -38,7 +34,7 @@ CIRCULAR_DEPENDENCIES=()
 
 IFS=$'\n'
 for CIRC in $(cd src && ../contrib/devtools/circular-dependencies.py {*,*/*,*/*/*}.{h,cpp} | sed -e 's/^Circular dependency: //'); do
-    CIRCULAR_DEPENDENCIES+=($CIRC)
+    CIRCULAR_DEPENDENCIES+=( "$CIRC" )
     IS_EXPECTED_CIRC=0
     for EXPECTED_CIRC in "${EXPECTED_CIRCULAR_DEPENDENCIES[@]}"; do
         if [[ "${CIRC}" == "${EXPECTED_CIRC}" ]]; then

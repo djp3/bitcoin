@@ -17,35 +17,30 @@
 #include <wallet/wallet.h>
 #endif
 
-#include <boost/thread.hpp>
-
 const std::string ADDRESS_BCRT1_UNSPENDABLE = "bcrt1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3xueyj";
 
 #ifdef ENABLE_WALLET
 std::string getnewaddress(CWallet& w)
 {
     constexpr auto output_type = OutputType::BECH32;
-
-    CPubKey new_key;
-    if (!w.GetKeyFromPool(new_key)) assert(false);
-
-    w.LearnRelatedScripts(new_key, output_type);
-    const auto dest = GetDestinationForKey(new_key, output_type);
-
-    w.SetAddressBook(dest, /* label */ "", "receive");
+    CTxDestination dest;
+    std::string error;
+    if (!w.GetNewDestination(output_type, "", dest, error)) assert(false);
 
     return EncodeDestination(dest);
 }
 
 void importaddress(CWallet& wallet, const std::string& address)
 {
+    auto spk_man = wallet.GetLegacyScriptPubKeyMan();
     LOCK(wallet.cs_wallet);
+    AssertLockHeld(spk_man->cs_wallet);
     const auto dest = DecodeDestination(address);
     assert(IsValidDestination(dest));
     const auto script = GetScriptForDestination(dest);
     wallet.MarkDirty();
-    assert(!wallet.HaveWatchOnly(script));
-    if (!wallet.AddWatchOnly(script, 0 /* nCreateTime */)) assert(false);
+    assert(!spk_man->HaveWatchOnly(script));
+    if (!spk_man->AddWatchOnly(script, 0 /* nCreateTime */)) assert(false);
     wallet.SetAddressBook(dest, /* label */ "", "receive");
 }
 #endif // ENABLE_WALLET
