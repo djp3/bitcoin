@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2019 The Bitcoin Core developers
+// Copyright (c) 2009-2020 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -63,6 +63,14 @@ void UnlockDirectory(const fs::path& directory, const std::string& lockfile_name
 bool DirIsWritable(const fs::path& directory);
 bool CheckDiskSpace(const fs::path& dir, uint64_t additional_bytes = 0);
 
+/** Get the size of a file by scanning it.
+ *
+ * @param[in] path The file path
+ * @param[in] max Stop seeking beyond this limit
+ * @return The file size or max
+ */
+std::streampos GetFileSize(const char* path, std::streamsize max = std::numeric_limits<std::streamsize>::max());
+
 /** Release all directory locks. This is used for unit testing only, at runtime
  * the global destructor will take care of the locks.
  */
@@ -80,6 +88,9 @@ void ClearDatadirCache();
 fs::path GetConfigFile(const std::string& confPath);
 #ifdef WIN32
 fs::path GetSpecialFolderPath(int nFolder, bool fCreate = true);
+#endif
+#ifndef WIN32
+std::string ShellEscape(const std::string& arg);
 #endif
 #if HAVE_SYSTEM
 void runCommand(const std::string& strCommand);
@@ -145,6 +156,8 @@ public:
          * between mainnet and regtest/testnet won't cause problems due to these
          * parameters by accident. */
         NETWORK_ONLY = 0x200,
+        // This argument's value is sensitive (such as a password).
+        SENSITIVE = 0x400,
     };
 
 protected:
@@ -155,7 +168,7 @@ protected:
         unsigned int m_flags;
     };
 
-    mutable CCriticalSection cs_args;
+    mutable RecursiveMutex cs_args;
     util::Settings m_settings GUARDED_BY(cs_args);
     std::string m_network GUARDED_BY(cs_args);
     std::set<std::string> m_network_only_args GUARDED_BY(cs_args);
@@ -187,6 +200,7 @@ protected:
 
 public:
     ArgsManager();
+    ~ArgsManager();
 
     /**
      * Select the network in use
@@ -318,6 +332,19 @@ public:
      * Return nullopt for unknown arg.
      */
     Optional<unsigned int> GetArgFlags(const std::string& name) const;
+
+    /**
+     * Log the config file options and the command line arguments,
+     * useful for troubleshooting.
+     */
+    void LogArgs() const;
+
+private:
+    // Helper function for LogArgs().
+    void logArgsPrefix(
+        const std::string& prefix,
+        const std::string& section,
+        const std::map<std::string, std::vector<util::SettingsValue>>& args) const;
 };
 
 extern ArgsManager gArgs;

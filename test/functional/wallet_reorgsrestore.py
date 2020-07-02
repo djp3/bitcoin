@@ -77,8 +77,7 @@ class ReorgsRestoreTest(BitcoinTestFramework):
         assert_equal(conflicted["walletconflicts"][0], conflicting["txid"])
 
         # Node0 wallet is shutdown
-        self.stop_node(0)
-        self.start_node(0)
+        self.restart_node(0)
 
         # The block chain re-orgs and the tx is included in a different block
         self.nodes[1].generate(9)
@@ -90,7 +89,7 @@ class ReorgsRestoreTest(BitcoinTestFramework):
         # Node0 wallet file is loaded on longest sync'ed node1
         self.stop_node(1)
         self.nodes[0].backupwallet(os.path.join(self.nodes[0].datadir, 'wallet.bak'))
-        shutil.copyfile(os.path.join(self.nodes[0].datadir, 'wallet.bak'), os.path.join(self.nodes[1].datadir, 'regtest', 'wallet.dat'))
+        shutil.copyfile(os.path.join(self.nodes[0].datadir, 'wallet.bak'), os.path.join(self.nodes[1].datadir, self.chain, 'wallet.dat'))
         self.start_node(1)
         tx_after_reorg = self.nodes[1].gettransaction(txid)
         # Check that normal confirmed tx is confirmed again but with different blockhash

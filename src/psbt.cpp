@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2018 The Bitcoin Core developers
+// Copyright (c) 2009-2020 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -66,8 +66,11 @@ bool PartiallySignedTransaction::AddOutput(const CTxOut& txout, const PSBTOutput
 bool PartiallySignedTransaction::GetInputUTXO(CTxOut& utxo, int input_index) const
 {
     PSBTInput input = inputs[input_index];
-    int prevout_index = tx->vin[input_index].prevout.n;
+    uint32_t prevout_index = tx->vin[input_index].prevout.n;
     if (input.non_witness_utxo) {
+        if (prevout_index >= input.non_witness_utxo->vout.size()) {
+            return false;
+        }
         utxo = input.non_witness_utxo->vout[prevout_index];
     } else if (!input.witness_utxo.IsNull()) {
         utxo = input.witness_utxo;
@@ -211,6 +214,17 @@ bool PSBTInputSigned(const PSBTInput& input)
     return !input.final_script_sig.empty() || !input.final_script_witness.IsNull();
 }
 
+size_t CountPSBTUnsignedInputs(const PartiallySignedTransaction& psbt) {
+    size_t count = 0;
+    for (const auto& input : psbt.inputs) {
+        if (!PSBTInputSigned(input)) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
 void UpdatePSBTOutput(const SigningProvider& provider, PartiallySignedTransaction& psbt, int index)
 {
     const CTxOut& out = psbt.tx->vout.at(index);
@@ -255,6 +269,9 @@ bool SignPSBTInput(const SigningProvider& provider, PartiallySignedTransaction& 
     if (input.non_witness_utxo) {
         // If we're taking our information from a non-witness UTXO, verify that it matches the prevout.
         COutPoint prevout = tx.vin[index].prevout;
+        if (prevout.n >= input.non_witness_utxo->vout.size()) {
+            return false;
+        }
         if (input.non_witness_utxo->GetHash() != prevout.hash) {
             return false;
         }

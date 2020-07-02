@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2019 The Bitcoin Core developers
+// Copyright (c) 2009-2020 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -9,6 +9,8 @@
 #include <stdint.h>
 #include <string>
 #include <chrono>
+
+void UninterruptibleSleep(const std::chrono::microseconds& n);
 
 /**
  * Helper to count the seconds of a duration.
@@ -35,8 +37,6 @@ int64_t GetSystemTimeInSeconds(); // Like GetTime(), but not mockable
 void SetMockTime(int64_t nMockTimeIn);
 /** For testing */
 int64_t GetMockTime();
-
-void MilliSleep(int64_t n);
 
 /** Return system time (or mocked time, if set) */
 template <typename T>

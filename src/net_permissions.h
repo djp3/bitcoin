@@ -1,13 +1,19 @@
-// Copyright (c) 2009-2018 The Bitcoin Core developers
+// Copyright (c) 2009-2020 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <netaddress.h>
+
 #include <string>
 #include <vector>
-#include <netaddress.h>
 
 #ifndef BITCOIN_NET_PERMISSIONS_H
 #define BITCOIN_NET_PERMISSIONS_H
+
+struct bilingual_str;
+
+extern const std::vector<std::string> NET_PERMISSIONS_DOC;
+
 enum NetPermissionFlags
 {
     PF_NONE = 0,
@@ -15,7 +21,7 @@ enum NetPermissionFlags
     PF_BLOOMFILTER = (1U << 1),
     // Relay and accept transactions from this peer, even if -blocksonly is true
     PF_RELAY = (1U << 3),
-    // Always relay transactions from this peer, even if already in mempool or rejected from policy
+    // Always relay transactions from this peer, even if already in mempool
     // Keep parameter interaction: forcerelay implies relay
     PF_FORCERELAY = (1U << 2) | PF_RELAY,
     // Can't be banned for misbehavior
@@ -27,6 +33,7 @@ enum NetPermissionFlags
     PF_ISIMPLICIT = (1U << 31),
     PF_ALL = PF_BLOOMFILTER | PF_FORCERELAY | PF_RELAY | PF_NOBAN | PF_MEMPOOL,
 };
+
 class NetPermissions
 {
 public:
@@ -45,17 +52,18 @@ public:
         flags = static_cast<NetPermissionFlags>(flags & ~f);
     }
 };
+
 class NetWhitebindPermissions : public NetPermissions
 {
 public:
-    static bool TryParse(const std::string str, NetWhitebindPermissions& output, std::string& error);
+    static bool TryParse(const std::string str, NetWhitebindPermissions& output, bilingual_str& error);
     CService m_service;
 };
 
 class NetWhitelistPermissions : public NetPermissions
 {
 public:
-    static bool TryParse(const std::string str, NetWhitelistPermissions& output, std::string& error);
+    static bool TryParse(const std::string str, NetWhitelistPermissions& output, bilingual_str& error);
     CSubNet m_subnet;
 };
 
