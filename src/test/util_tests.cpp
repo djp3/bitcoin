@@ -9,6 +9,7 @@
 #include <key.h>  // For CKey
 #include <optional.h>
 #include <sync.h>
+#include <test/util/logging.h>
 #include <test/util/setup_common.h>
 #include <test/util/str.h>
 #include <uint256.h>
@@ -40,6 +41,16 @@ namespace BCLog {
 }
 
 BOOST_FIXTURE_TEST_SUITE(util_tests, BasicTestingSetup)
+
+BOOST_AUTO_TEST_CASE(util_check)
+{
+    // Check that Assert can forward
+    const std::unique_ptr<int> p_two = Assert(MakeUnique<int>(2));
+    // Check that Assert works on lvalues and rvalues
+    const int two = *Assert(p_two);
+    Assert(two == 2);
+    Assert(true);
+}
 
 BOOST_AUTO_TEST_CASE(util_criticalsection)
 {
@@ -1126,6 +1137,28 @@ BOOST_FIXTURE_TEST_CASE(util_ChainMerge, ChainMergeTestingSetup)
     //
     //   <input> || <output>
     BOOST_CHECK_EQUAL(out_sha_hex, "f0b3a3c29869edc765d579c928f7f1690a71fbb673b49ccf39cbc4de18156a0d");
+}
+
+BOOST_AUTO_TEST_CASE(util_ReadWriteSettings)
+{
+    // Test writing setting.
+    TestArgsManager args1;
+    args1.LockSettings([&](util::Settings& settings) { settings.rw_settings["name"] = "value"; });
+    args1.WriteSettingsFile();
+
+    // Test reading setting.
+    TestArgsManager args2;
+    args2.ReadSettingsFile();
+    args2.LockSettings([&](util::Settings& settings) { BOOST_CHECK_EQUAL(settings.rw_settings["name"].get_str(), "value"); });
+
+    // Test error logging, and remove previously written setting.
+    {
+        ASSERT_DEBUG_LOG("Failed renaming settings file");
+        fs::remove(GetDataDir() / "settings.json");
+        fs::create_directory(GetDataDir() / "settings.json");
+        args2.WriteSettingsFile();
+        fs::remove(GetDataDir() / "settings.json");
+    }
 }
 
 BOOST_AUTO_TEST_CASE(util_FormatMoney)
