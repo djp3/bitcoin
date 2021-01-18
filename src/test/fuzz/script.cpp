@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-void initialize()
+void initialize_script()
 {
     // Fuzzers using pubkey must hold an ECCVerifyHandle.
     static const ECCVerifyHandle verify_handle;
@@ -37,7 +37,7 @@ void initialize()
     SelectParams(CBaseChainParams::REGTEST);
 }
 
-void test_one_input(const std::vector<uint8_t>& buffer)
+FUZZ_TARGET_INIT(script, initialize_script)
 {
     FuzzedDataProvider fuzzed_data_provider(buffer.data(), buffer.size());
     const std::optional<CScript> script_opt = ConsumeDeserializable<CScript>(fuzzed_data_provider);
@@ -63,8 +63,6 @@ void test_one_input(const std::vector<uint8_t>& buffer)
     int required_ret;
     (void)ExtractDestinations(script, type_ret, addresses, required_ret);
 
-    (void)GetScriptForWitness(script);
-
     const FlatSigningProvider signing_provider;
     (void)InferDescriptor(script, signing_provider);
 
@@ -73,7 +71,22 @@ void test_one_input(const std::vector<uint8_t>& buffer)
     (void)IsSolvable(signing_provider, script);
 
     TxoutType which_type;
-    (void)IsStandard(script, which_type);
+    bool is_standard_ret = IsStandard(script, which_type);
+    if (!is_standard_ret) {
+        assert(which_type == TxoutType::NONSTANDARD ||
+               which_type == TxoutType::NULL_DATA ||
+               which_type == TxoutType::MULTISIG);
+    }
+    if (which_type == TxoutType::NONSTANDARD) {
+        assert(!is_standard_ret);
+    }
+    if (which_type == TxoutType::NULL_DATA) {
+        assert(script.IsUnspendable());
+    }
+    if (script.IsUnspendable()) {
+        assert(which_type == TxoutType::NULL_DATA ||
+               which_type == TxoutType::NONSTANDARD);
+    }
 
     (void)RecursiveDynamicUsage(script);
 
@@ -84,7 +97,6 @@ void test_one_input(const std::vector<uint8_t>& buffer)
     (void)script.IsPayToScriptHash();
     (void)script.IsPayToWitnessScriptHash();
     (void)script.IsPushOnly();
-    (void)script.IsUnspendable();
     (void)script.GetSigOpCount(/* fAccurate= */ false);
 
     (void)FormatScript(script);

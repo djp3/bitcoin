@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-void initialize()
+void initialize_signature_checker()
 {
     static const auto verify_handle = MakeUnique<ECCVerifyHandle>();
 }
@@ -24,11 +24,16 @@ class FuzzedSignatureChecker : public BaseSignatureChecker
     FuzzedDataProvider& m_fuzzed_data_provider;
 
 public:
-    FuzzedSignatureChecker(FuzzedDataProvider& fuzzed_data_provider) : m_fuzzed_data_provider(fuzzed_data_provider)
+    explicit FuzzedSignatureChecker(FuzzedDataProvider& fuzzed_data_provider) : m_fuzzed_data_provider(fuzzed_data_provider)
     {
     }
 
-    bool CheckSig(const std::vector<unsigned char>& scriptSig, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const override
+    bool CheckECDSASignature(const std::vector<unsigned char>& scriptSig, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const override
+    {
+        return m_fuzzed_data_provider.ConsumeBool();
+    }
+
+    bool CheckSchnorrSignature(Span<const unsigned char> sig, Span<const unsigned char> pubkey, SigVersion sigversion, const ScriptExecutionData& execdata, ScriptError* serror = nullptr) const override
     {
         return m_fuzzed_data_provider.ConsumeBool();
     }
@@ -47,7 +52,7 @@ public:
 };
 } // namespace
 
-void test_one_input(const std::vector<uint8_t>& buffer)
+FUZZ_TARGET_INIT(signature_checker, initialize_signature_checker)
 {
     FuzzedDataProvider fuzzed_data_provider(buffer.data(), buffer.size());
     const unsigned int flags = fuzzed_data_provider.ConsumeIntegral<unsigned int>();
