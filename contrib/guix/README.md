@@ -13,11 +13,9 @@ We achieve bootstrappability by using Guix as a functional package manager.
 
 Conservatively, a x86_64 machine with:
 
-- 4GB of free disk space on the partition that /gnu/store will reside in
-- 24GB of free disk space on the partition that the Bitcoin Core git repository
-  resides in
-
-> Note: these requirements are slightly less onerous than those of Gitian builds
+- 16GB of free disk space on the partition that /gnu/store will reside in
+- 8GB of free disk space per platform triple you're planning on building (see
+  the `HOSTS` environment variable description)
 
 ## Setup
 
@@ -105,13 +103,27 @@ find output/ -type f -print0 | sort -z | xargs -r0 sha256sum
 
   Override the space-separated list of platform triples for which to perform a
   bootstrappable build. _(defaults to "x86\_64-linux-gnu arm-linux-gnueabihf
-  aarch64-linux-gnu riscv64-linux-gnu x86_64-w64-mingw32")_
+  aarch64-linux-gnu riscv64-linux-gnu powerpc64-linux-gnu powerpc64le-linux-gnu
+  x86\_64-w64-mingw32 x86\_64-apple-darwin18")_
 
 * _**SOURCES_PATH**_
 
   Set the depends tree download cache for sources. This is passed through to the
   depends tree. Setting this to the same directory across multiple builds of the
   depends tree can eliminate unnecessary redownloading of package sources.
+
+* _**BASE_CACHE**_
+
+  Set the depends tree cache for built packages. This is passed through to the
+  depends tree. Setting this to the same directory across multiple builds of the
+  depends tree can eliminate unnecessary building of packages.
+
+* _**SDK_PATH**_
+
+  Set the path where _extracted_ SDKs can be found. This is passed through to
+  the depends tree. Note that this is should be set to the _parent_ directory of
+  the actual SDK (e.g. SDK_PATH=$HOME/Downloads/macOS-SDKs instead of
+  $HOME/Downloads/macOS-SDKs/Xcode-11.3.1-11C505-extracted-SDK-with-libcxx-headers).
 
 * _**MAX_JOBS**_
 
@@ -216,11 +228,11 @@ As mentioned at the bottom of [this manual page][guix/bin-install]:
 >
 >     make guix-binary.x86_64-linux.tar.xz
 
-### When will Guix be packaged in debian?
+### Is Guix packaged in my operating system?
 
-Thanks to Vagrant Cascadian's diligent work, Guix is now [in debian
-experimental][debian/guix-experimental]! Hopefully it will make its way into a
-release soon.
+Guix is shipped starting with [Debian Bullseye][debian/guix-bullseye] and
+[Ubuntu 21.04 "Hirsute Hippo"][ubuntu/guix-hirsute]. Other operating systems
+are working on packaging Guix as well.
 
 [b17e]: http://bootstrappable.org/
 [r12e/source-date-epoch]: https://reproducible-builds.org/docs/source-date-epoch/
@@ -232,5 +244,6 @@ release soon.
 [guix/substitute-server-auth]: https://www.gnu.org/software/guix/manual/en/html_node/Substitute-Server-Authorization.html
 [guix/time-machine]: https://guix.gnu.org/manual/en/html_node/Invoking-guix-time_002dmachine.html
 
-[debian/guix-experimental]: https://packages.debian.org/experimental/guix
+[debian/guix-bullseye]: https://packages.debian.org/bullseye/guix
+[ubuntu/guix-hirsute]: https://packages.ubuntu.com/hirsute/guix
 [fanquake/guix-docker]: https://github.com/fanquake/core-review/tree/master/guix

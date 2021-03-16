@@ -15,7 +15,6 @@ class CTxMemPool;
 class ChainstateManager;
 
 extern RecursiveMutex cs_main;
-extern RecursiveMutex g_cs_orphans;
 
 /** Default for -maxorphantx, maximum number of orphan transactions kept in memory */
 static const unsigned int DEFAULT_MAX_ORPHAN_TRANSACTIONS = 100;
@@ -30,6 +29,7 @@ struct CNodeStateStats {
     int nSyncHeight = -1;
     int nCommonHeight = -1;
     int m_starting_height = -1;
+    std::chrono::microseconds m_ping_wait;
     std::vector<int> vHeightInFlight;
 };
 
@@ -46,6 +46,9 @@ public:
 
     /** Whether this node ignores txs received over p2p. */
     virtual bool IgnoresIncomingTxs() = 0;
+
+    /** Send ping message to all peers */
+    virtual void SendPings() = 0;
 
     /** Set the best height */
     virtual void SetBestHeight(int height) = 0;

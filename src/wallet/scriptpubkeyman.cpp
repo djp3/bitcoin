@@ -13,6 +13,7 @@
 #include <util/system.h>
 #include <util/time.h>
 #include <util/translation.h>
+#include <wallet/external_signer.h>
 #include <wallet/scriptpubkeyman.h>
 
 //! Value for the first BIP 32 hardened derivation. Can be used as a bit mask and as a value. See BIP 32 for more details.
@@ -94,8 +95,7 @@ IsMineResult IsMineInner(const LegacyScriptPubKeyMan& keystore, const CScript& s
     TxoutType whichType = Solver(scriptPubKey, vSolutions);
 
     CKeyID keyID;
-    switch (whichType)
-    {
+    switch (whichType) {
     case TxoutType::NONSTANDARD:
     case TxoutType::NULL_DATA:
     case TxoutType::WITNESS_UNKNOWN:
@@ -194,7 +194,7 @@ IsMineResult IsMineInner(const LegacyScriptPubKeyMan& keystore, const CScript& s
         }
         break;
     }
-    }
+    } // no default case, so the compiler can warn about missing cases
 
     if (ret == IsMineResult::NO && keystore.HaveWatchOnly(scriptPubKey)) {
         ret = std::max(ret, IsMineResult::WATCH_ONLY);
@@ -378,7 +378,7 @@ void LegacyScriptPubKeyMan::UpgradeKeyMetadata()
         return;
     }
 
-    std::unique_ptr<WalletBatch> batch = MakeUnique<WalletBatch>(m_storage.GetDatabase());
+    std::unique_ptr<WalletBatch> batch = std::make_unique<WalletBatch>(m_storage.GetDatabase());
     for (auto& meta_pair : mapKeyMetadata) {
         CKeyMetadata& meta = meta_pair.second;
         if (!meta.hd_seed_id.IsNull() && !meta.has_key_origin && meta.hdKeypath != "s") { // If the hdKeypath is "s", that's the seed and it doesn't have a key origin
@@ -551,7 +551,7 @@ int64_t LegacyScriptPubKeyMan::GetTimeFirstKey() const
 
 std::unique_ptr<SigningProvider> LegacyScriptPubKeyMan::GetSolvingProvider(const CScript& script) const
 {
-    return MakeUnique<LegacySigningProvider>(*this);
+    return std::make_unique<LegacySigningProvider>(*this);
 }
 
 bool LegacyScriptPubKeyMan::CanProvide(const CScript& script, SignatureData& sigdata)
@@ -651,14 +651,14 @@ std::unique_ptr<CKeyMetadata> LegacyScriptPubKeyMan::GetMetadata(const CTxDestin
     if (!key_id.IsNull()) {
         auto it = mapKeyMetadata.find(key_id);
         if (it != mapKeyMetadata.end()) {
-            return MakeUnique<CKeyMetadata>(it->second);
+            return std::make_unique<CKeyMetadata>(it->second);
         }
     }
 
     CScript scriptPubKey = GetScriptForDestination(dest);
     auto it = m_script_metadata.find(CScriptID(scriptPubKey));
     if (it != m_script_metadata.end()) {
-        return MakeUnique<CKeyMetadata>(it->second);
+        return std::make_unique<CKeyMetadata>(it->second);
     }
 
     return nullptr;
@@ -2026,7 +2026,7 @@ std::unique_ptr<FlatSigningProvider> DescriptorScriptPubKeyMan::GetSigningProvid
 {
     AssertLockHeld(cs_desc_man);
     // Get the scripts, keys, and key origins for this script
-    std::unique_ptr<FlatSigningProvider> out_keys = MakeUnique<FlatSigningProvider>();
+    std::unique_ptr<FlatSigningProvider> out_keys = std::make_unique<FlatSigningProvider>();
     std::vector<CScript> scripts_temp;
     if (!m_wallet_descriptor.descriptor->ExpandFromCache(index, m_wallet_descriptor.cache, scripts_temp, *out_keys)) return nullptr;
 
@@ -2051,7 +2051,7 @@ bool DescriptorScriptPubKeyMan::CanProvide(const CScript& script, SignatureData&
 
 bool DescriptorScriptPubKeyMan::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint, Coin>& coins, int sighash, std::map<int, std::string>& input_errors) const
 {
-    std::unique_ptr<FlatSigningProvider> keys = MakeUnique<FlatSigningProvider>();
+    std::unique_ptr<FlatSigningProvider> keys = std::make_unique<FlatSigningProvider>();
     for (const auto& coin_pair : coins) {
         std::unique_ptr<FlatSigningProvider> coin_keys = GetSigningProvider(coin_pair.second.out.scriptPubKey, true);
         if (!coin_keys) {
@@ -2115,13 +2115,13 @@ TransactionError DescriptorScriptPubKeyMan::FillPSBT(PartiallySignedTransaction&
         SignatureData sigdata;
         input.FillSignatureData(sigdata);
 
-        std::unique_ptr<FlatSigningProvider> keys = MakeUnique<FlatSigningProvider>();
+        std::unique_ptr<FlatSigningProvider> keys = std::make_unique<FlatSigningProvider>();
         std::unique_ptr<FlatSigningProvider> script_keys = GetSigningProvider(script, sign);
         if (script_keys) {
             *keys = Merge(*keys, *script_keys);
         } else {
             // Maybe there are pubkeys listed that we can sign for
-            script_keys = MakeUnique<FlatSigningProvider>();
+            script_keys = std::make_unique<FlatSigningProvider>();
             for (const auto& pk_pair : input.hd_keypaths) {
                 const CPubKey& pubkey = pk_pair.first;
                 std::unique_ptr<FlatSigningProvider> pk_keys = GetSigningProvider(pubkey);
@@ -2162,7 +2162,7 @@ std::unique_ptr<CKeyMetadata> DescriptorScriptPubKeyMan::GetMetadata(const CTxDe
         CKeyID key_id = GetKeyForDestination(*provider, dest);
         if (provider->GetKeyOrigin(key_id, orig)) {
             LOCK(cs_desc_man);
-            std::unique_ptr<CKeyMetadata> meta = MakeUnique<CKeyMetadata>();
+            std::unique_ptr<CKeyMetadata> meta = std::make_unique<CKeyMetadata>();
             meta->key_origin = orig;
             meta->has_key_origin = true;
             meta->nCreateTime = m_wallet_descriptor.creation_time;
@@ -2264,4 +2264,17 @@ const std::vector<CScript> DescriptorScriptPubKeyMan::GetScriptPubKeys() const
         script_pub_keys.push_back(script_pub_key.first);
     }
     return script_pub_keys;
+}
+
+bool DescriptorScriptPubKeyMan::GetDescriptorString(std::string& out, bool priv) const
+{
+    LOCK(cs_desc_man);
+    if (m_storage.IsLocked()) {
+        return false;
+    }
+
+    FlatSigningProvider provider;
+    provider.keys = GetKeys();
+
+    return m_wallet_descriptor.descriptor->ToNormalizedString(provider, out, priv);
 }

@@ -113,23 +113,6 @@ std::vector<unsigned char> ParseHexO(const UniValue& o, std::string strKey)
     return ParseHexV(find_value(o, strKey), strKey);
 }
 
-CoinStatsHashType ParseHashType(const UniValue& param, const CoinStatsHashType default_type)
-{
-    if (param.isNull()) {
-        return default_type;
-    } else {
-        std::string hash_type_input = param.get_str();
-
-        if (hash_type_input == "hash_serialized_2") {
-            return CoinStatsHashType::HASH_SERIALIZED;
-        } else if (hash_type_input == "none") {
-            return CoinStatsHashType::NONE;
-        } else {
-            throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("%d is not a valid hash_type", hash_type_input));
-        }
-    }
-}
-
 std::string HelpExampleCli(const std::string& methodname, const std::string& args)
 {
     return "> bitcoin-cli " + methodname + " " + args + "\n";
@@ -476,6 +459,21 @@ std::string RPCExamples::ToDescriptionString() const
     return m_examples.empty() ? m_examples : "\nExamples:\n" + m_examples;
 }
 
+UniValue RPCHelpMan::HandleRequest(const JSONRPCRequest& request)
+{
+    if (request.mode == JSONRPCRequest::GET_ARGS) {
+        return GetArgMap();
+    }
+    /*
+     * Check if the given request is valid according to this command or if
+     * the user is asking for help information, and throw help when appropriate.
+     */
+    if (request.mode == JSONRPCRequest::GET_HELP || !IsValidNumArgs(request.params.size())) {
+        throw std::runtime_error(ToString());
+    }
+    return m_fun(*this, request);
+}
+
 bool RPCHelpMan::IsValidNumArgs(size_t num_args) const
 {
     size_t num_required_args = 0;
@@ -547,6 +545,26 @@ std::string RPCHelpMan::ToString() const
     ret += m_examples.ToDescriptionString();
 
     return ret;
+}
+
+UniValue RPCHelpMan::GetArgMap() const
+{
+    UniValue arr{UniValue::VARR};
+    for (int i{0}; i < int(m_args.size()); ++i) {
+        const auto& arg = m_args.at(i);
+        std::vector<std::string> arg_names;
+        boost::split(arg_names, arg.m_names, boost::is_any_of("|"));
+        for (const auto& arg_name : arg_names) {
+            UniValue map{UniValue::VARR};
+            map.push_back(m_name);
+            map.push_back(i);
+            map.push_back(arg_name);
+            map.push_back(arg.m_type == RPCArg::Type::STR ||
+                          arg.m_type == RPCArg::Type::STR_HEX);
+            arr.push_back(map);
+        }
+    }
+    return arr;
 }
 
 std::string RPCArg::GetFirstName() const

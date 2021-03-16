@@ -13,6 +13,7 @@
 #include <test/util/setup_common.h>
 #include <test/util/str.h>
 #include <uint256.h>
+#include <util/getuniquepath.h>
 #include <util/message.h> // For MessageSign(), MessageVerify(), MESSAGE_MAGIC
 #include <util/moneystr.h>
 #include <util/spanparsing.h>
@@ -37,6 +38,7 @@
 #include <boost/test/unit_test.hpp>
 
 using namespace std::literals;
+static const std::string STRING_WITH_EMBEDDED_NULL_CHAR{"1"s "\0" "1"s};
 
 /* defined in logging.cpp */
 namespace BCLog {
@@ -70,7 +72,7 @@ BOOST_AUTO_TEST_CASE(util_datadir)
 BOOST_AUTO_TEST_CASE(util_check)
 {
     // Check that Assert can forward
-    const std::unique_ptr<int> p_two = Assert(MakeUnique<int>(2));
+    const std::unique_ptr<int> p_two = Assert(std::make_unique<int>(2));
     // Check that Assert works on lvalues and rvalues
     const int two = *Assert(p_two);
     Assert(two == 2);
@@ -1179,6 +1181,16 @@ BOOST_AUTO_TEST_CASE(util_FormatMoney)
     BOOST_CHECK_EQUAL(FormatMoney(COIN/1000000), "0.000001");
     BOOST_CHECK_EQUAL(FormatMoney(COIN/10000000), "0.0000001");
     BOOST_CHECK_EQUAL(FormatMoney(COIN/100000000), "0.00000001");
+
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::max()), "92233720368.54775807");
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::max() - 1), "92233720368.54775806");
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::max() - 2), "92233720368.54775805");
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::max() - 3), "92233720368.54775804");
+    // ...
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::min() + 3), "-92233720368.54775805");
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::min() + 2), "-92233720368.54775806");
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::min() + 1), "-92233720368.54775807");
+    BOOST_CHECK_EQUAL(FormatMoney(std::numeric_limits<CAmount>::min()), "-92233720368.54775808");
 }
 
 BOOST_AUTO_TEST_CASE(util_ParseMoney)
@@ -1261,7 +1273,7 @@ BOOST_AUTO_TEST_CASE(util_ParseMoney)
 
     // Parsing strings with embedded NUL characters should fail
     BOOST_CHECK(!ParseMoney("\0-1"s, ret));
-    BOOST_CHECK(!ParseMoney("\0" "1"s, ret));
+    BOOST_CHECK(!ParseMoney(STRING_WITH_EMBEDDED_NULL_CHAR, ret));
     BOOST_CHECK(!ParseMoney("1\0"s, ret));
 }
 
@@ -1439,9 +1451,7 @@ BOOST_AUTO_TEST_CASE(test_ParseInt32)
     BOOST_CHECK(!ParseInt32("aap", &n));
     BOOST_CHECK(!ParseInt32("0x1", &n)); // no hex
     BOOST_CHECK(!ParseInt32("0x1", &n)); // no hex
-    const char test_bytes[] = {'1', 0, '1'};
-    std::string teststr(test_bytes, sizeof(test_bytes));
-    BOOST_CHECK(!ParseInt32(teststr, &n)); // no embedded NULs
+    BOOST_CHECK(!ParseInt32(STRING_WITH_EMBEDDED_NULL_CHAR, &n));
     // Overflow and underflow
     BOOST_CHECK(!ParseInt32("-2147483649", nullptr));
     BOOST_CHECK(!ParseInt32("2147483648", nullptr));
@@ -1469,14 +1479,48 @@ BOOST_AUTO_TEST_CASE(test_ParseInt64)
     BOOST_CHECK(!ParseInt64("1a", &n));
     BOOST_CHECK(!ParseInt64("aap", &n));
     BOOST_CHECK(!ParseInt64("0x1", &n)); // no hex
-    const char test_bytes[] = {'1', 0, '1'};
-    std::string teststr(test_bytes, sizeof(test_bytes));
-    BOOST_CHECK(!ParseInt64(teststr, &n)); // no embedded NULs
+    BOOST_CHECK(!ParseInt64(STRING_WITH_EMBEDDED_NULL_CHAR, &n));
     // Overflow and underflow
     BOOST_CHECK(!ParseInt64("-9223372036854775809", nullptr));
     BOOST_CHECK(!ParseInt64("9223372036854775808", nullptr));
     BOOST_CHECK(!ParseInt64("-32482348723847471234", nullptr));
     BOOST_CHECK(!ParseInt64("32482348723847471234", nullptr));
+}
+
+BOOST_AUTO_TEST_CASE(test_ParseUInt8)
+{
+    uint8_t n;
+    // Valid values
+    BOOST_CHECK(ParseUInt8("255", nullptr));
+    BOOST_CHECK(ParseUInt8("0", &n) && n == 0);
+    BOOST_CHECK(ParseUInt8("255", &n) && n == 255);
+    BOOST_CHECK(ParseUInt8("0255", &n) && n == 255); // no octal
+    BOOST_CHECK(ParseUInt8("255", &n) && n == static_cast<uint8_t>(255));
+    BOOST_CHECK(ParseUInt8("+255", &n) && n == 255);
+    BOOST_CHECK(ParseUInt8("00000000000000000012", &n) && n == 12);
+    BOOST_CHECK(ParseUInt8("00000000000000000000", &n) && n == 0);
+    // Invalid values
+    BOOST_CHECK(!ParseUInt8("-00000000000000000000", &n));
+    BOOST_CHECK(!ParseUInt8("", &n));
+    BOOST_CHECK(!ParseUInt8(" 1", &n)); // no padding inside
+    BOOST_CHECK(!ParseUInt8(" -1", &n));
+    BOOST_CHECK(!ParseUInt8("++1", &n));
+    BOOST_CHECK(!ParseUInt8("+-1", &n));
+    BOOST_CHECK(!ParseUInt8("-+1", &n));
+    BOOST_CHECK(!ParseUInt8("--1", &n));
+    BOOST_CHECK(!ParseUInt8("-1", &n));
+    BOOST_CHECK(!ParseUInt8("1 ", &n));
+    BOOST_CHECK(!ParseUInt8("1a", &n));
+    BOOST_CHECK(!ParseUInt8("aap", &n));
+    BOOST_CHECK(!ParseUInt8("0x1", &n)); // no hex
+    BOOST_CHECK(!ParseUInt8("0x1", &n)); // no hex
+    BOOST_CHECK(!ParseUInt8(STRING_WITH_EMBEDDED_NULL_CHAR, &n));
+    // Overflow and underflow
+    BOOST_CHECK(!ParseUInt8("-255", &n));
+    BOOST_CHECK(!ParseUInt8("256", &n));
+    BOOST_CHECK(!ParseUInt8("-123", &n));
+    BOOST_CHECK(!ParseUInt8("-123", nullptr));
+    BOOST_CHECK(!ParseUInt8("256", nullptr));
 }
 
 BOOST_AUTO_TEST_CASE(test_ParseUInt32)
@@ -1508,9 +1552,7 @@ BOOST_AUTO_TEST_CASE(test_ParseUInt32)
     BOOST_CHECK(!ParseUInt32("aap", &n));
     BOOST_CHECK(!ParseUInt32("0x1", &n)); // no hex
     BOOST_CHECK(!ParseUInt32("0x1", &n)); // no hex
-    const char test_bytes[] = {'1', 0, '1'};
-    std::string teststr(test_bytes, sizeof(test_bytes));
-    BOOST_CHECK(!ParseUInt32(teststr, &n)); // no embedded NULs
+    BOOST_CHECK(!ParseUInt32(STRING_WITH_EMBEDDED_NULL_CHAR, &n));
     // Overflow and underflow
     BOOST_CHECK(!ParseUInt32("-2147483648", &n));
     BOOST_CHECK(!ParseUInt32("4294967296", &n));
@@ -1539,9 +1581,7 @@ BOOST_AUTO_TEST_CASE(test_ParseUInt64)
     BOOST_CHECK(!ParseUInt64("1a", &n));
     BOOST_CHECK(!ParseUInt64("aap", &n));
     BOOST_CHECK(!ParseUInt64("0x1", &n)); // no hex
-    const char test_bytes[] = {'1', 0, '1'};
-    std::string teststr(test_bytes, sizeof(test_bytes));
-    BOOST_CHECK(!ParseUInt64(teststr, &n)); // no embedded NULs
+    BOOST_CHECK(!ParseUInt64(STRING_WITH_EMBEDDED_NULL_CHAR, &n));
     // Overflow and underflow
     BOOST_CHECK(!ParseUInt64("-9223372036854775809", nullptr));
     BOOST_CHECK(!ParseUInt64("18446744073709551616", nullptr));
@@ -1571,9 +1611,7 @@ BOOST_AUTO_TEST_CASE(test_ParseDouble)
     BOOST_CHECK(!ParseDouble("1a", &n));
     BOOST_CHECK(!ParseDouble("aap", &n));
     BOOST_CHECK(!ParseDouble("0x1", &n)); // no hex
-    const char test_bytes[] = {'1', 0, '1'};
-    std::string teststr(test_bytes, sizeof(test_bytes));
-    BOOST_CHECK(!ParseDouble(teststr, &n)); // no embedded NULs
+    BOOST_CHECK(!ParseDouble(STRING_WITH_EMBEDDED_NULL_CHAR, &n));
     // Overflow and underflow
     BOOST_CHECK(!ParseDouble("-1e10000", nullptr));
     BOOST_CHECK(!ParseDouble("1e10000", nullptr));
@@ -1816,7 +1854,7 @@ BOOST_AUTO_TEST_CASE(test_DirIsWritable)
     BOOST_CHECK_EQUAL(DirIsWritable(tmpdirname), true);
 
     // Should not be able to write to a non-existent dir.
-    tmpdirname = tmpdirname / fs::unique_path();
+    tmpdirname = GetUniquePath(tmpdirname);
     BOOST_CHECK_EQUAL(DirIsWritable(tmpdirname), false);
 
     fs::create_directory(tmpdirname);
@@ -2198,6 +2236,19 @@ BOOST_AUTO_TEST_CASE(message_hash)
 
     BOOST_CHECK_EQUAL(message_hash1, message_hash2);
     BOOST_CHECK_NE(message_hash1, signature_hash);
+}
+
+BOOST_AUTO_TEST_CASE(remove_prefix)
+{
+    BOOST_CHECK_EQUAL(RemovePrefix("./util/system.h", "./"), "util/system.h");
+    BOOST_CHECK_EQUAL(RemovePrefix("foo", "foo"), "");
+    BOOST_CHECK_EQUAL(RemovePrefix("foo", "fo"), "o");
+    BOOST_CHECK_EQUAL(RemovePrefix("foo", "f"), "oo");
+    BOOST_CHECK_EQUAL(RemovePrefix("foo", ""), "foo");
+    BOOST_CHECK_EQUAL(RemovePrefix("fo", "foo"), "fo");
+    BOOST_CHECK_EQUAL(RemovePrefix("f", "foo"), "f");
+    BOOST_CHECK_EQUAL(RemovePrefix("", "foo"), "");
+    BOOST_CHECK_EQUAL(RemovePrefix("", ""), "");
 }
 
 BOOST_AUTO_TEST_SUITE_END()

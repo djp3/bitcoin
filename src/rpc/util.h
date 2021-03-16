@@ -77,8 +77,6 @@ extern uint256 ParseHashO(const UniValue& o, std::string strKey);
 extern std::vector<unsigned char> ParseHexV(const UniValue& v, std::string strName);
 extern std::vector<unsigned char> ParseHexO(const UniValue& o, std::string strKey);
 
-CoinStatsHashType ParseHashType(const UniValue& param, const CoinStatsHashType default_type);
-
 extern CAmount AmountFromValue(const UniValue& value);
 extern std::string HelpExampleCli(const std::string& methodname, const std::string& args);
 extern std::string HelpExampleRpc(const std::string& methodname, const std::string& args);
@@ -335,24 +333,12 @@ public:
     using RPCMethodImpl = std::function<UniValue(const RPCHelpMan&, const JSONRPCRequest&)>;
     RPCHelpMan(std::string name, std::string description, std::vector<RPCArg> args, RPCResults results, RPCExamples examples, RPCMethodImpl fun);
 
+    UniValue HandleRequest(const JSONRPCRequest& request);
     std::string ToString() const;
-    UniValue HandleRequest(const JSONRPCRequest& request)
-    {
-        Check(request);
-        return m_fun(*this, request);
-    }
+    /** Return the named args that need to be converted from string to another JSON type */
+    UniValue GetArgMap() const;
     /** If the supplied number of args is neither too small nor too high */
     bool IsValidNumArgs(size_t num_args) const;
-    /**
-     * Check if the given request is valid according to this command or if
-     * the user is asking for help information, and throw help when appropriate.
-     */
-    inline void Check(const JSONRPCRequest& request) const {
-        if (request.fHelp || !IsValidNumArgs(request.params.size())) {
-            throw std::runtime_error(ToString());
-        }
-    }
-
     std::vector<std::string> GetArgNames() const;
 
     const std::string m_name;

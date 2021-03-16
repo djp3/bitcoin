@@ -57,7 +57,7 @@ static RPCHelpMan getconnectioncount()
     if(!node.connman)
         throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
 
-    return (int)node.connman->GetNodeCount(CConnman::CONNECTIONS_ALL);
+    return (int)node.connman->GetNodeCount(ConnectionDirection::Both);
 },
     };
 }
@@ -77,13 +77,12 @@ static RPCHelpMan ping()
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
     NodeContext& node = EnsureNodeContext(request.context);
-    if(!node.connman)
+    if (!node.peerman) {
         throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
+    }
 
     // Request that each node send a ping during next message processing pass
-    node.connman->ForEachNode([](CNode* pnode) {
-        pnode->fPingQueued = true;
-    });
+    node.peerman->SendPings();
     return NullUniValue;
 },
     };
@@ -104,7 +103,7 @@ static RPCHelpMan getpeerinfo()
                             {RPCResult::Type::STR, "addr", "(host:port) The IP address and port of the peer"},
                             {RPCResult::Type::STR, "addrbind", "(ip:port) Bind address of the connection to the peer"},
                             {RPCResult::Type::STR, "addrlocal", "(ip:port) Local address as reported by the peer"},
-                            {RPCResult::Type::STR, "network", "Network (ipv4, ipv6, or onion) the peer connected through"},
+                            {RPCResult::Type::STR, "network", "Network (" + Join(GetNetworkNames(/* append_unroutable */ true), ", ") + ")"},
                             {RPCResult::Type::NUM, "mapped_as", "The AS in the BGP route to the peer used for diversifying\n"
                                                                 "peer selection (only available if the asmap config flag is set)"},
                             {RPCResult::Type::STR_HEX, "services", "The services offered"},
@@ -203,14 +202,14 @@ static RPCHelpMan getpeerinfo()
         obj.pushKV("bytesrecv", stats.nRecvBytes);
         obj.pushKV("conntime", stats.nTimeConnected);
         obj.pushKV("timeoffset", stats.nTimeOffset);
-        if (stats.m_ping_usec > 0) {
-            obj.pushKV("pingtime", ((double)stats.m_ping_usec) / 1e6);
+        if (stats.m_last_ping_time > 0us) {
+            obj.pushKV("pingtime", CountSecondsDouble(stats.m_last_ping_time));
         }
-        if (stats.m_min_ping_usec < std::numeric_limits<int64_t>::max()) {
-            obj.pushKV("minping", ((double)stats.m_min_ping_usec) / 1e6);
+        if (stats.m_min_ping_time < std::chrono::microseconds::max()) {
+            obj.pushKV("minping", CountSecondsDouble(stats.m_min_ping_time));
         }
-        if (stats.m_ping_wait_usec > 0) {
-            obj.pushKV("pingwait", ((double)stats.m_ping_wait_usec) / 1e6);
+        if (fStateStats && statestats.m_ping_wait > 0s) {
+            obj.pushKV("pingwait", CountSecondsDouble(statestats.m_ping_wait));
         }
         obj.pushKV("version", stats.nVersion);
         // Use the sanitized form of subver here, to avoid tricksy remote peers from
@@ -547,7 +546,7 @@ static UniValue GetNetworksInfo()
     UniValue networks(UniValue::VARR);
     for (int n = 0; n < NET_MAX; ++n) {
         enum Network network = static_cast<enum Network>(n);
-        if (network == NET_UNROUTABLE || network == NET_I2P || network == NET_CJDNS || network == NET_INTERNAL) continue;
+        if (network == NET_UNROUTABLE || network == NET_CJDNS || network == NET_INTERNAL) continue;
         proxyType proxy;
         UniValue obj(UniValue::VOBJ);
         GetProxy(network, proxy);
@@ -587,7 +586,7 @@ static RPCHelpMan getnetworkinfo()
                         {
                             {RPCResult::Type::OBJ, "", "",
                             {
-                                {RPCResult::Type::STR, "name", "network (ipv4, ipv6 or onion)"},
+                                {RPCResult::Type::STR, "name", "network (" + Join(GetNetworkNames(), ", ") + ")"},
                                 {RPCResult::Type::BOOL, "limited", "is the network limited using -onlynet?"},
                                 {RPCResult::Type::BOOL, "reachable", "is the network reachable?"},
                                 {RPCResult::Type::STR, "proxy", "(\"host:port\") the proxy that is used for this network, or empty if none"},
@@ -631,9 +630,9 @@ static RPCHelpMan getnetworkinfo()
     obj.pushKV("timeoffset",    GetTimeOffset());
     if (node.connman) {
         obj.pushKV("networkactive", node.connman->GetNetworkActive());
-        obj.pushKV("connections", (int)node.connman->GetNodeCount(CConnman::CONNECTIONS_ALL));
-        obj.pushKV("connections_in", (int)node.connman->GetNodeCount(CConnman::CONNECTIONS_IN));
-        obj.pushKV("connections_out", (int)node.connman->GetNodeCount(CConnman::CONNECTIONS_OUT));
+        obj.pushKV("connections", (int)node.connman->GetNodeCount(ConnectionDirection::Both));
+        obj.pushKV("connections_in", (int)node.connman->GetNodeCount(ConnectionDirection::In));
+        obj.pushKV("connections_out", (int)node.connman->GetNodeCount(ConnectionDirection::Out));
     }
     obj.pushKV("networks",      GetNetworksInfo());
     obj.pushKV("relayfee",      ValueFromAmount(::minRelayTxFee.GetFeePerK()));
@@ -941,24 +940,24 @@ void RegisterNetRPCCommands(CRPCTable &t)
 {
 // clang-format off
 static const CRPCCommand commands[] =
-{ //  category              name                      actor (function)         argNames
-  //  --------------------- ------------------------  -----------------------  ----------
-    { "network",            "getconnectioncount",     &getconnectioncount,     {} },
-    { "network",            "ping",                   &ping,                   {} },
-    { "network",            "getpeerinfo",            &getpeerinfo,            {} },
-    { "network",            "addnode",                &addnode,                {"node","command"} },
-    { "network",            "disconnectnode",         &disconnectnode,         {"address", "nodeid"} },
-    { "network",            "getaddednodeinfo",       &getaddednodeinfo,       {"node"} },
-    { "network",            "getnettotals",           &getnettotals,           {} },
-    { "network",            "getnetworkinfo",         &getnetworkinfo,         {} },
-    { "network",            "setban",                 &setban,                 {"subnet", "command", "bantime", "absolute"} },
-    { "network",            "listbanned",             &listbanned,             {} },
-    { "network",            "clearbanned",            &clearbanned,            {} },
-    { "network",            "setnetworkactive",       &setnetworkactive,       {"state"} },
-    { "network",            "getnodeaddresses",       &getnodeaddresses,       {"count"} },
+{ //  category              actor
+  //  --------------------- -----------------------
+    { "network",             &getconnectioncount,      },
+    { "network",             &ping,                    },
+    { "network",             &getpeerinfo,             },
+    { "network",             &addnode,                 },
+    { "network",             &disconnectnode,          },
+    { "network",             &getaddednodeinfo,        },
+    { "network",             &getnettotals,            },
+    { "network",             &getnetworkinfo,          },
+    { "network",             &setban,                  },
+    { "network",             &listbanned,              },
+    { "network",             &clearbanned,             },
+    { "network",             &setnetworkactive,        },
+    { "network",             &getnodeaddresses,        },
 
-    { "hidden",             "addconnection",          &addconnection,          {"address", "connection_type"} },
-    { "hidden",             "addpeeraddress",         &addpeeraddress,         {"address", "port"} },
+    { "hidden",              &addconnection,           },
+    { "hidden",              &addpeeraddress,          },
 };
 // clang-format on
     for (const auto& c : commands) {

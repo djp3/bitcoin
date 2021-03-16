@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Bitcoin Core developers
+// Copyright (c) 2020-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -67,6 +67,7 @@ FUZZ_TARGET(string)
     }
     OutputType output_type;
     (void)ParseOutputType(random_string_1, output_type);
+    (void)RemovePrefix(random_string_1, random_string_2);
     (void)ResolveErrMsg(random_string_1, random_string_2);
     try {
         (void)RPCConvertNamedValues(random_string_1, random_string_vector);
@@ -78,7 +79,9 @@ FUZZ_TARGET(string)
     }
     (void)SanitizeString(random_string_1);
     (void)SanitizeString(random_string_1, fuzzed_data_provider.ConsumeIntegralInRange<int>(0, 3));
+#ifndef WIN32
     (void)ShellEscape(random_string_1);
+#endif // WIN32
     int port_out;
     std::string host_out;
     SplitHostPort(random_string_1, port_out, host_out);

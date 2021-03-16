@@ -9,7 +9,7 @@ set -e -o pipefail
 ################
 # Check 1: Make sure that we can invoke required tools
 ################
-for cmd in git make guix cat mkdir; do
+for cmd in git make guix cat mkdir curl; do
     if ! command -v "$cmd" > /dev/null 2>&1; then
         echo "ERR: This script requires that '$cmd' is installed and available in your \$PATH"
         exit 1
@@ -65,12 +65,13 @@ else
 fi
 
 ################
-# Check 4: Make sure that build directories do no exist
+# Check 4: Make sure that build directories do not exist
 ################
 
 # Default to building for all supported HOSTs (overridable by environment)
-export HOSTS="${HOSTS:-x86_64-linux-gnu arm-linux-gnueabihf aarch64-linux-gnu riscv64-linux-gnu
-                       x86_64-w64-mingw32}"
+export HOSTS="${HOSTS:-x86_64-linux-gnu arm-linux-gnueabihf aarch64-linux-gnu riscv64-linux-gnu powerpc64-linux-gnu powerpc64le-linux-gnu
+                       x86_64-w64-mingw32
+                       x86_64-apple-darwin18}"
 
 DISTSRC_BASE="${DISTSRC_BASE:-${PWD}}"
 
@@ -105,8 +106,27 @@ for host in $hosts_distsrc_exists; do
 done
 exit 1
 else
+
     mkdir -p "$DISTSRC_BASE"
 fi
+
+################
+# Check 5: When building for darwin, make sure that the macOS SDK exists
+################
+
+for host in $HOSTS; do
+    case "$host" in
+        *darwin*)
+            OSX_SDK="$(make -C "${PWD}/depends" --no-print-directory HOST="$host" print-OSX_SDK | sed 's@^[^=]\+=[[:space:]]\+@@g')"
+            if [ -e "$OSX_SDK" ]; then
+                echo "Found macOS SDK at '${OSX_SDK}', using..."
+            else
+                echo "macOS SDK does not exist at '${OSX_SDK}', please place the extracted, untarred SDK there to perform darwin builds, exiting..."
+                exit 1
+            fi
+            ;;
+    esac
+done
 
 #########
 # Setup #
@@ -116,9 +136,24 @@ fi
 # environment)
 MAX_JOBS="${MAX_JOBS:-$(nproc)}"
 
+# Usage: host_to_commonname HOST
+#
+#   HOST: The current platform triple we're building for
+#
+host_to_commonname() {
+    case "$1" in
+        *darwin*) echo osx ;;
+        *mingw*)  echo win ;;
+        *linux*)  echo linux ;;
+        *)        exit 1 ;;
+    esac
+}
+
 # Download the depends sources now as we won't have internet access in the build
 # container
-make -C "${PWD}/depends" -j"$MAX_JOBS" download ${V:+V=1} ${SOURCES_PATH:+SOURCES_PATH="$SOURCES_PATH"}
+for host in $HOSTS; do
+  make -C "${PWD}/depends" -j"$MAX_JOBS" download-"$(host_to_commonname "$host")" ${V:+V=1} ${SOURCES_PATH:+SOURCES_PATH="$SOURCES_PATH"}
+done
 
 # Determine the reference time used for determinism (overridable by environment)
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git log --format=%at -1)}"
@@ -128,8 +163,9 @@ SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git log --format=%at -1)}"
 time-machine() {
     # shellcheck disable=SC2086
     guix time-machine --url=https://github.com/dongcarl/guix.git \
-                      --commit=b066c25026f21fb57677aa34692a5034338e7ee3 \
+                      --commit=490e39ff303f4f6873a04bfb8253755bdae1b29c \
                       --max-jobs="$MAX_JOBS" \
+                      --keep-failed \
                       ${SUBSTITUTE_URLS:+--substitute-urls="$SUBSTITUTE_URLS"} \
                       ${ADDITIONAL_GUIX_COMMON_FLAGS} ${ADDITIONAL_GUIX_TIMEMACHINE_FLAGS} \
                       -- "$@"
@@ -159,6 +195,12 @@ excluding the SDK directory. Practically speaking, this means that all ignored
 and untracked files and directories will be wiped, allowing you to start anew.
 EOF
 }
+
+# Create SOURCES_PATH, BASE_CACHE, and SDK_PATH if they are non-empty so that we
+# can map them into the container
+[ -z "$SOURCES_PATH" ] || mkdir -p "$SOURCES_PATH"
+[ -z "$BASE_CACHE" ]   || mkdir -p "$BASE_CACHE"
+[ -z "$SDK_PATH" ]     || mkdir -p "$SDK_PATH"
 
 # Deterministically build Bitcoin Core
 # shellcheck disable=SC2153
@@ -234,6 +276,12 @@ EOF
         #     make the downloaded depends sources available to it. The sources
         #     should have been downloaded prior to this invocation.
         #
+        #   --keep-failed     keep build tree of failed builds
+        #
+        #     When builds of the Guix environment itself (not Bitcoin Core)
+        #     fail, it is useful for the build tree to be kept for debugging
+        #     purposes.
+        #
         #  ${SUBSTITUTE_URLS:+--substitute-urls="$SUBSTITUTE_URLS"}
         #
         #                     fetch substitute from SUBSTITUTE_URLS if they are
@@ -254,7 +302,10 @@ EOF
                                  --share="$OUTDIR"=/outdir \
                                  --expose="$(git rev-parse --git-common-dir)" \
                                  ${SOURCES_PATH:+--share="$SOURCES_PATH"} \
+                                 ${BASE_CACHE:+--share="$BASE_CACHE"} \
+                                 ${SDK_PATH:+--share="$SDK_PATH"} \
                                  --max-jobs="$MAX_JOBS" \
+                                 --keep-failed \
                                  ${SUBSTITUTE_URLS:+--substitute-urls="$SUBSTITUTE_URLS"} \
                                  ${ADDITIONAL_GUIX_COMMON_FLAGS} ${ADDITIONAL_GUIX_ENVIRONMENT_FLAGS} \
                                  -- env HOST="$host" \
@@ -262,6 +313,8 @@ EOF
                                         SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:?unable to determine value}" \
                                         ${V:+V=1} \
                                         ${SOURCES_PATH:+SOURCES_PATH="$SOURCES_PATH"} \
+                                        ${BASE_CACHE:+BASE_CACHE="$BASE_CACHE"} \
+                                        ${SDK_PATH:+SDK_PATH="$SDK_PATH"} \
                                         DISTSRC="$(DISTSRC_BASE=/distsrc-base && distsrc_for_host "$HOST")" \
                                         OUTDIR=/outdir \
                                       bash -c "cd /bitcoin && bash contrib/guix/libexec/build.sh"

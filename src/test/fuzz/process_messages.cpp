@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Bitcoin Core developers
+// Copyright (c) 2020-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -13,22 +13,18 @@
 #include <test/util/net.h>
 #include <test/util/setup_common.h>
 #include <test/util/validation.h>
-#include <util/memory.h>
+#include <txorphanage.h>
 #include <validation.h>
 #include <validationinterface.h>
 
+namespace {
 const TestingSetup* g_setup;
+} // namespace
 
 void initialize_process_messages()
 {
-    static TestingSetup setup{
-        CBaseChainParams::REGTEST,
-        {
-            "-nodebuglogfile",
-        },
-    };
-    g_setup = &setup;
-
+    static const auto testing_setup = MakeNoLogFileContext<const TestingSetup>();
+    g_setup = testing_setup.get();
     for (int i = 0; i < 2 * COINBASE_MATURITY; i++) {
         MineBlock(g_setup->m_node, CScript() << OP_TRUE);
     }
@@ -49,11 +45,12 @@ FUZZ_TARGET_INIT(process_messages, initialize_process_messages)
     for (int i = 0; i < num_peers_to_add; ++i) {
         peers.push_back(ConsumeNodeAsUniquePtr(fuzzed_data_provider, i).release());
         CNode& p2p_node = *peers.back();
-        FillNode(fuzzed_data_provider, p2p_node);
 
-        p2p_node.fSuccessfullyConnected = true;
+        const bool successfully_connected{fuzzed_data_provider.ConsumeBool()};
+        p2p_node.fSuccessfullyConnected = successfully_connected;
         p2p_node.fPauseSend = false;
         g_setup->m_node.peerman->InitializeNode(&p2p_node);
+        FillNode(fuzzed_data_provider, p2p_node, /* init_version */ successfully_connected);
 
         connman.AddTestNode(p2p_node);
     }
