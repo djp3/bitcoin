@@ -13,8 +13,10 @@
 #include <util/system.h>
 #include <util/time.h>
 #include <util/translation.h>
-#include <wallet/external_signer.h>
+#include <external_signer.h>
 #include <wallet/scriptpubkeyman.h>
+
+#include <optional>
 
 //! Value for the first BIP 32 hardened derivation. Can be used as a bit mask and as a value. See BIP 32 for more details.
 const uint32_t BIP32_HARDENED_KEY_LIMIT = 0x80000000;
@@ -82,7 +84,7 @@ bool HaveKeys(const std::vector<valtype>& pubkeys, const LegacyScriptPubKeyMan& 
 //! Recursively solve script and return spendable/watchonly/invalid status.
 //!
 //! @param keystore            legacy key and script store
-//! @param script              script to solve
+//! @param scriptPubKey        script to solve
 //! @param sigversion          script type (top-level / redeemscript / witnessscript)
 //! @param recurse_scripthash  whether to recurse into nested p2sh and p2wsh
 //!                            scripts or simply treat any script that has been
@@ -1607,7 +1609,7 @@ bool DescriptorScriptPubKeyMan::GetNewDestination(const OutputType type, CTxDest
     {
         LOCK(cs_desc_man);
         assert(m_wallet_descriptor.descriptor->IsSingleType()); // This is a combo descriptor which should not be an active descriptor
-        Optional<OutputType> desc_addr_type = m_wallet_descriptor.descriptor->GetOutputType();
+        std::optional<OutputType> desc_addr_type = m_wallet_descriptor.descriptor->GetOutputType();
         assert(desc_addr_type);
         if (type != *desc_addr_type) {
             throw std::runtime_error(std::string(__func__) + ": Types are inconsistent");
@@ -1629,7 +1631,7 @@ bool DescriptorScriptPubKeyMan::GetNewDestination(const OutputType type, CTxDest
             return false;
         }
 
-        Optional<OutputType> out_script_type = m_wallet_descriptor.descriptor->GetOutputType();
+        std::optional<OutputType> out_script_type = m_wallet_descriptor.descriptor->GetOutputType();
         if (out_script_type && out_script_type == type) {
             ExtractDestination(scripts_temp[0], dest);
         } else {
