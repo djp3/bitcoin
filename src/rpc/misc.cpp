@@ -5,8 +5,12 @@
 
 #include <httpserver.h>
 #include <index/blockfilterindex.h>
+#include <index/coinstatsindex.h>
 #include <index/txindex.h>
 #include <interfaces/chain.h>
+#include <interfaces/echo.h>
+#include <interfaces/init.h>
+#include <interfaces/ipc.h>
 #include <key_io.h>
 #include <node/context.h>
 #include <outputtype.h>
@@ -20,6 +24,7 @@
 #include <util/strencodings.h>
 #include <util/system.h>
 
+#include <optional>
 #include <stdint.h>
 #include <tuple>
 #ifdef HAVE_MALLOC_INFO
@@ -104,7 +109,7 @@ static RPCHelpMan createmultisig()
             "\nCreate a multisig address from 2 public keys\n"
             + HelpExampleCli("createmultisig", "2 \"[\\\"03789ed0bb717d88f7d321a368d905e7430207ebbd82bd342cf11ae157a7ace5fd\\\",\\\"03dbc6764b8884a92e871274b87583e6d5c2a58819473e17e107ef3f6aa5a61626\\\"]\"") +
             "\nAs a JSON-RPC call\n"
-            + HelpExampleRpc("createmultisig", "2, \"[\\\"03789ed0bb717d88f7d321a368d905e7430207ebbd82bd342cf11ae157a7ace5fd\\\",\\\"03dbc6764b8884a92e871274b87583e6d5c2a58819473e17e107ef3f6aa5a61626\\\"]\"")
+            + HelpExampleRpc("createmultisig", "2, [\"03789ed0bb717d88f7d321a368d905e7430207ebbd82bd342cf11ae157a7ace5fd\",\"03dbc6764b8884a92e871274b87583e6d5c2a58819473e17e107ef3f6aa5a61626\"]")
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
@@ -124,9 +129,13 @@ static RPCHelpMan createmultisig()
     // Get the output type
     OutputType output_type = OutputType::LEGACY;
     if (!request.params[2].isNull()) {
-        if (!ParseOutputType(request.params[2].get_str(), output_type)) {
+        std::optional<OutputType> parsed = ParseOutputType(request.params[2].get_str());
+        if (!parsed) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("Unknown address type '%s'", request.params[2].get_str()));
+        } else if (parsed.value() == OutputType::BECH32M) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "createmultisig cannot create bech32m multisig addresses");
         }
+        output_type = parsed.value();
     }
 
     // Construct using pay-to-script-hash:
@@ -149,6 +158,8 @@ static RPCHelpMan createmultisig()
 
 static RPCHelpMan getdescriptorinfo()
 {
+    const std::string EXAMPLE_DESCRIPTOR = "wpkh([d34db33f/84h/0h/0h]0279be667ef9dcbbac55a06295Ce870b07029Bfcdb2dce28d959f2815b16f81798)";
+
     return RPCHelpMan{"getdescriptorinfo",
             {"\nAnalyses a descriptor.\n"},
             {
@@ -166,7 +177,8 @@ static RPCHelpMan getdescriptorinfo()
             },
             RPCExamples{
                 "Analyse a descriptor\n" +
-                HelpExampleCli("getdescriptorinfo", "\"wpkh([d34db33f/84h/0h/0h]0279be667ef9dcbbac55a06295Ce870b07029Bfcdb2dce28d959f2815b16f81798)\"")
+                HelpExampleCli("getdescriptorinfo", "\"" + EXAMPLE_DESCRIPTOR + "\"") +
+                HelpExampleRpc("getdescriptorinfo", "\"" + EXAMPLE_DESCRIPTOR + "\"")
             },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
@@ -192,6 +204,8 @@ static RPCHelpMan getdescriptorinfo()
 
 static RPCHelpMan deriveaddresses()
 {
+    const std::string EXAMPLE_DESCRIPTOR = "wpkh([d34db33f/84h/0h/0h]xpub6DJ2dNUysrn5Vt36jH2KLBT2i1auw1tTSSomg8PhqNiUtx8QX2SvC9nrHu81fT41fvDUnhMjEzQgXnQjKEu3oaqMSzhSrHMxyyoEAmUHQbY/0/*)#cjjspncu";
+
     return RPCHelpMan{"deriveaddresses",
             {"\nDerives one or more addresses corresponding to an output descriptor.\n"
             "Examples of output descriptors are:\n"
@@ -214,7 +228,8 @@ static RPCHelpMan deriveaddresses()
             },
             RPCExamples{
                 "First three native segwit receive addresses\n" +
-                HelpExampleCli("deriveaddresses", "\"wpkh([d34db33f/84h/0h/0h]xpub6DJ2dNUysrn5Vt36jH2KLBT2i1auw1tTSSomg8PhqNiUtx8QX2SvC9nrHu81fT41fvDUnhMjEzQgXnQjKEu3oaqMSzhSrHMxyyoEAmUHQbY/0/*)#cjjspncu\" \"[0,2]\"")
+                HelpExampleCli("deriveaddresses", "\"" + EXAMPLE_DESCRIPTOR + "\" \"[0,2]\"") +
+                HelpExampleRpc("deriveaddresses", "\"" + EXAMPLE_DESCRIPTOR + "\", \"[0,2]\"")
             },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
@@ -420,7 +435,7 @@ static RPCHelpMan mockscheduler()
     // check params are valid values
     RPCTypeCheck(request.params, {UniValue::VNUM});
     int64_t delta_seconds = request.params[0].get_int64();
-    if ((delta_seconds <= 0) || (delta_seconds > 3600)) {
+    if (delta_seconds <= 0 || delta_seconds > 3600) {
         throw std::runtime_error("delta_time must be between 1 and 3600 seconds (1 hr)");
     }
 
@@ -644,6 +659,43 @@ static RPCHelpMan echo(const std::string& name)
 static RPCHelpMan echo() { return echo("echo"); }
 static RPCHelpMan echojson() { return echo("echojson"); }
 
+static RPCHelpMan echoipc()
+{
+    return RPCHelpMan{
+        "echoipc",
+        "\nEcho back the input argument, passing it through a spawned process in a multiprocess build.\n"
+        "This command is for testing.\n",
+        {{"arg", RPCArg::Type::STR, RPCArg::Optional::NO, "The string to echo",}},
+        RPCResult{RPCResult::Type::STR, "echo", "The echoed string."},
+        RPCExamples{HelpExampleCli("echo", "\"Hello world\"") +
+                    HelpExampleRpc("echo", "\"Hello world\"")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue {
+            std::unique_ptr<interfaces::Echo> echo;
+            if (interfaces::Ipc* ipc = Assert(EnsureAnyNodeContext(request.context).init)->ipc()) {
+                // Spawn a new bitcoin-node process and call makeEcho to get a
+                // client pointer to a interfaces::Echo instance running in
+                // that process. This is just for testing. A slightly more
+                // realistic test spawning a different executable instead of
+                // the same executable would add a new bitcoin-echo executable,
+                // and spawn bitcoin-echo below instead of bitcoin-node. But
+                // using bitcoin-node avoids the need to build and install a
+                // new executable just for this one test.
+                auto init = ipc->spawnProcess("bitcoin-node");
+                echo = init->makeEcho();
+                ipc->addCleanup(*echo, [init = init.release()] { delete init; });
+            } else {
+                // IPC support is not available because this is a bitcoind
+                // process not a bitcoind-node process, so just create a local
+                // interfaces::Echo object and return it so the `echoipc` RPC
+                // method will work, and the python test calling `echoipc`
+                // can expect the same result.
+                echo = interfaces::MakeEcho();
+            }
+            return echo->echo(request.params[0].get_str());
+        },
+    };
+}
+
 static UniValue SummaryToJSON(const IndexSummary&& summary, std::string index_name)
 {
     UniValue ret_summary(UniValue::VOBJ);
@@ -689,6 +741,10 @@ static RPCHelpMan getindexinfo()
         result.pushKVs(SummaryToJSON(g_txindex->GetSummary(), index_name));
     }
 
+    if (g_coin_stats_index) {
+        result.pushKVs(SummaryToJSON(g_coin_stats_index->GetSummary(), index_name));
+    }
+
     ForEachBlockFilterIndex([&result, &index_name](const BlockFilterIndex& index) {
         result.pushKVs(SummaryToJSON(index.GetSummary(), index_name));
     });
@@ -719,6 +775,7 @@ static const CRPCCommand commands[] =
     { "hidden",             &mockscheduler,           },
     { "hidden",             &echo,                    },
     { "hidden",             &echojson,                },
+    { "hidden",             &echoipc,                 },
 };
 // clang-format on
     for (const auto& c : commands) {

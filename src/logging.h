@@ -58,6 +58,8 @@ namespace BCLog {
         LEVELDB     = (1 << 20),
         VALIDATION  = (1 << 21),
         I2P         = (1 << 22),
+        IPC         = (1 << 23),
+        LOCK        = (1 << 24),
         ALL         = ~(uint32_t)0,
     };
 
@@ -137,9 +139,9 @@ namespace BCLog {
         bool DisableCategory(const std::string& str);
 
         bool WillLogCategory(LogFlags category) const;
-        /** Returns a vector of the log categories */
+        /** Returns a vector of the log categories in alphabetical order. */
         std::vector<LogCategory> LogCategoriesList() const;
-        /** Returns a string with the log categories */
+        /** Returns a string with the log categories in alphabetical order. */
         std::string LogCategoriesString() const
         {
             return Join(LogCategoriesList(), ", ", [&](const LogCategory& i) { return i.category; });
