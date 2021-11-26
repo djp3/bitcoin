@@ -141,7 +141,7 @@ public:
     template <typename Stream>
     void Unserialize(Stream& s)
     {
-        unsigned int len = ::ReadCompactSize(s);
+        const unsigned int len(::ReadCompactSize(s));
         if (len <= SIZE) {
             s.read((char*)vch, len);
             if (len != size()) {
@@ -149,9 +149,7 @@ public:
             }
         } else {
             // invalid pubkey, skip available data
-            char dummy;
-            while (len--)
-                s.read(&dummy, 1);
+            s.ignore(len);
             Invalidate();
         }
     }
@@ -230,8 +228,8 @@ public:
     XOnlyPubKey& operator=(const XOnlyPubKey&) = default;
 
     /** Determine if this pubkey is fully valid. This is true for approximately 50% of all
-     *  possible 32-byte arrays. If false, VerifySchnorr and CreatePayToContract will always
-     *  fail. */
+     *  possible 32-byte arrays. If false, VerifySchnorr, CheckTapTweak and CreateTapTweak
+     *  will always fail. */
     bool IsFullyValid() const;
 
     /** Test whether this is the 0 key (the result of default construction). This implies

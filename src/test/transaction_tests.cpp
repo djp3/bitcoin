@@ -406,7 +406,7 @@ BOOST_AUTO_TEST_CASE(test_Get)
     t1.vout[0].nValue = 90*CENT;
     t1.vout[0].scriptPubKey << OP_1;
 
-    BOOST_CHECK(AreInputsStandard(CTransaction(t1), coins, false));
+    BOOST_CHECK(AreInputsStandard(CTransaction(t1), coins));
 }
 
 static void CreateCreditAndSpend(const FillableSigningProvider& keystore, const CScript& outscript, CTransactionRef& output, CMutableTransaction& input, bool success = true)
@@ -810,10 +810,10 @@ BOOST_AUTO_TEST_CASE(test_IsStandard)
     // nDustThreshold = 182 * 3702 / 1000
     dustRelayFee = CFeeRate(3702);
     // dust:
-    t.vout[0].nValue = 673 - 1;
+    t.vout[0].nValue = 674 - 1;
     CheckIsNotStandard(t, "dust");
     // not dust:
-    t.vout[0].nValue = 673;
+    t.vout[0].nValue = 674;
     CheckIsStandard(t);
     dustRelayFee = CFeeRate(DUST_RELAY_TX_FEE);
 

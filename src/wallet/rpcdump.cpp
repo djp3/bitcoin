@@ -57,7 +57,7 @@ static std::string DecodeDumpString(const std::string &str) {
     return ret.str();
 }
 
-static bool GetWalletAddressesForKey(LegacyScriptPubKeyMan* spk_man, const CWallet& wallet, const CKeyID& keyid, std::string& strAddr, std::string& strLabel) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
+static bool GetWalletAddressesForKey(const LegacyScriptPubKeyMan* spk_man, const CWallet& wallet, const CKeyID& keyid, std::string& strAddr, std::string& strLabel) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
 {
     bool fLabelFound = false;
     CKey key;
@@ -369,11 +369,9 @@ RPCHelpMan importprunedfunds()
 
     unsigned int txnIndex = vIndex[it - vMatch.begin()];
 
-    CWalletTx::Confirmation confirm(CWalletTx::Status::CONFIRMED, height, merkleBlock.header.GetHash(), txnIndex);
-
     CTransactionRef tx_ref = MakeTransactionRef(tx);
     if (pwallet->IsMine(*tx_ref)) {
-        pwallet->AddToWallet(std::move(tx_ref), confirm);
+        pwallet->AddToWallet(std::move(tx_ref), TxStateConfirmed{merkleBlock.header.GetHash(), height, static_cast<int>(txnIndex)});
         return NullUniValue;
     }
 
@@ -681,10 +679,10 @@ RPCHelpMan dumpprivkey()
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
-    LegacyScriptPubKeyMan& spk_man = EnsureLegacyScriptPubKeyMan(*pwallet);
+    const LegacyScriptPubKeyMan& spk_man = EnsureConstLegacyScriptPubKeyMan(*pwallet);
 
     LOCK2(pwallet->cs_wallet, spk_man.cs_KeyStore);
 
@@ -731,11 +729,11 @@ RPCHelpMan dumpwallet()
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    const std::shared_ptr<const CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return NullUniValue;
 
-    CWallet& wallet = *pwallet;
-    LegacyScriptPubKeyMan& spk_man = EnsureLegacyScriptPubKeyMan(wallet);
+    const CWallet& wallet = *pwallet;
+    const LegacyScriptPubKeyMan& spk_man = EnsureConstLegacyScriptPubKeyMan(wallet);
 
     // Make sure the results are valid at least up to the most recent block
     // the user could have gotten from another RPC command prior to now
@@ -797,7 +795,7 @@ RPCHelpMan dumpwallet()
         CKey seed;
         if (spk_man.GetKey(seed_id, seed)) {
             CExtKey masterKey;
-            masterKey.SetSeed(seed.begin(), seed.size());
+            masterKey.SetSeed(seed);
 
             file << "# extended private masterkey: " << EncodeExtKey(masterKey) << "\n\n";
         }
@@ -809,6 +807,9 @@ RPCHelpMan dumpwallet()
         std::string strLabel;
         CKey key;
         if (spk_man.GetKey(keyid, key)) {
+            CKeyMetadata metadata;
+            const auto it{spk_man.mapKeyMetadata.find(keyid)};
+            if (it != spk_man.mapKeyMetadata.end()) metadata = it->second;
             file << strprintf("%s %s ", EncodeSecret(key), strTime);
             if (GetWalletAddressesForKey(&spk_man, wallet, keyid, strAddr, strLabel)) {
                 file << strprintf("label=%s", strLabel);
@@ -816,12 +817,12 @@ RPCHelpMan dumpwallet()
                 file << "hdseed=1";
             } else if (mapKeyPool.count(keyid)) {
                 file << "reserve=1";
-            } else if (spk_man.mapKeyMetadata[keyid].hdKeypath == "s") {
+            } else if (metadata.hdKeypath == "s") {
                 file << "inactivehdseed=1";
             } else {
                 file << "change=1";
             }
-            file << strprintf(" # addr=%s%s\n", strAddr, (spk_man.mapKeyMetadata[keyid].has_key_origin ? " hdkeypath="+WriteHDKeypath(spk_man.mapKeyMetadata[keyid].key_origin.path) : ""));
+            file << strprintf(" # addr=%s%s\n", strAddr, (metadata.has_key_origin ? " hdkeypath="+WriteHDKeypath(metadata.key_origin.path) : ""));
         }
     }
     file << "\n";
@@ -1542,18 +1543,6 @@ static UniValue ProcessDescriptorImport(CWallet& wallet, const UniValue& data, c
             if (!expand_keys.GetKey(key_id, key)) {
                 have_all_privkeys = false;
                 break;
-            }
-        }
-
-        // Taproot descriptors cannot be imported if Taproot is not yet active.
-        // Check if this is a Taproot descriptor
-        CTxDestination dest;
-        ExtractDestination(scripts[0], dest);
-        if (std::holds_alternative<WitnessV1Taproot>(dest)) {
-            // Check if Taproot is active
-            if (!wallet.chain().isTaprootActive()) {
-                // Taproot is not active, raise an error
-                throw JSONRPCError(RPC_WALLET_ERROR, "Cannot import tr() descriptor when Taproot is not active");
             }
         }
 
