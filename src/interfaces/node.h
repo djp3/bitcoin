@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020 The Bitcoin Core developers
+// Copyright (c) 2018-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -22,22 +22,26 @@
 #include <vector>
 
 class BanMan;
-class CCoinControl;
 class CFeeRate;
 class CNodeStats;
 class Coin;
 class RPCTimerInterface;
 class UniValue;
-class proxyType;
+class Proxy;
 enum class SynchronizationState;
 enum class TransactionError;
 struct CNodeStateStats;
-struct NodeContext;
 struct bilingual_str;
+namespace node {
+struct NodeContext;
+} // namespace node
+namespace wallet {
+class CCoinControl;
+} // namespace wallet
 
 namespace interfaces {
 class Handler;
-class WalletClient;
+class WalletLoader;
 struct BlockTip;
 
 //! Block and header tip information
@@ -97,7 +101,7 @@ public:
     virtual void mapPort(bool use_upnp, bool use_natpmp) = 0;
 
     //! Get proxy.
-    virtual bool getProxy(Network net, proxyType& proxy_info) = 0;
+    virtual bool getProxy(Network net, Proxy& proxy_info) = 0;
 
     //! Get number of connections.
     virtual size_t getNodeCount(ConnectionDirection flags) = 0;
@@ -187,8 +191,8 @@ public:
     //! Broadcast transaction.
     virtual TransactionError broadcastTransaction(CTransactionRef tx, CAmount max_tx_fee, std::string& err_string) = 0;
 
-    //! Get wallet client.
-    virtual WalletClient& walletClient() = 0;
+    //! Get wallet loader.
+    virtual WalletLoader& walletLoader() = 0;
 
     //! Register handler for init messages.
     using InitMessageFn = std::function<void(const std::string& message)>;
@@ -210,7 +214,7 @@ public:
     using ShowProgressFn = std::function<void(const std::string& title, int progress, bool resume_possible)>;
     virtual std::unique_ptr<Handler> handleShowProgress(ShowProgressFn fn) = 0;
 
-    //! Register handler for wallet client constructed messages.
+    //! Register handler for wallet loader constructed messages.
     using InitWalletFn = std::function<void()>;
     virtual std::unique_ptr<Handler> handleInitWallet(InitWalletFn fn) = 0;
 
@@ -242,12 +246,12 @@ public:
 
     //! Get and set internal node context. Useful for testing, but not
     //! accessible across processes.
-    virtual NodeContext* context() { return nullptr; }
-    virtual void setContext(NodeContext* context) { }
+    virtual node::NodeContext* context() { return nullptr; }
+    virtual void setContext(node::NodeContext* context) { }
 };
 
 //! Return implementation of Node interface.
-std::unique_ptr<Node> MakeNode(NodeContext& context);
+std::unique_ptr<Node> MakeNode(node::NodeContext& context);
 
 //! Block tip (could be a header or not, depends on the subscribed signal).
 struct BlockTip {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2020 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -24,7 +24,8 @@
 #include <script/bitcoinconsensus.h>
 #endif
 
-#include <stdint.h>
+#include <cstdint>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -155,10 +156,10 @@ void DoTest(const CScript& scriptPubKey, const CScript& scriptSig, const CScript
     if (libconsensus_flags == flags) {
         int expectedSuccessCode = expect ? 1 : 0;
         if (flags & bitcoinconsensus_SCRIPT_FLAGS_VERIFY_WITNESS) {
-            BOOST_CHECK_MESSAGE(bitcoinconsensus_verify_script_with_amount(scriptPubKey.data(), scriptPubKey.size(), txCredit.vout[0].nValue, stream.data(), stream.size(), 0, libconsensus_flags, nullptr) == expectedSuccessCode, message);
+            BOOST_CHECK_MESSAGE(bitcoinconsensus_verify_script_with_amount(scriptPubKey.data(), scriptPubKey.size(), txCredit.vout[0].nValue, UCharCast(stream.data()), stream.size(), 0, libconsensus_flags, nullptr) == expectedSuccessCode, message);
         } else {
-            BOOST_CHECK_MESSAGE(bitcoinconsensus_verify_script_with_amount(scriptPubKey.data(), scriptPubKey.size(), 0, stream.data(), stream.size(), 0, libconsensus_flags, nullptr) == expectedSuccessCode, message);
-            BOOST_CHECK_MESSAGE(bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), stream.data(), stream.size(), 0, libconsensus_flags, nullptr) == expectedSuccessCode, message);
+            BOOST_CHECK_MESSAGE(bitcoinconsensus_verify_script_with_amount(scriptPubKey.data(), scriptPubKey.size(), 0, UCharCast(stream.data()), stream.size(), 0, libconsensus_flags, nullptr) == expectedSuccessCode, message);
+            BOOST_CHECK_MESSAGE(bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), UCharCast(stream.data()), stream.size(), 0, libconsensus_flags, nullptr) == expectedSuccessCode, message);
         }
     }
 #endif
@@ -284,7 +285,7 @@ public:
         CScript scriptPubKey = script;
         if (wm == WitnessMode::PKH) {
             uint160 hash;
-            CHash160().Write(MakeSpan(script).subspan(1)).Finalize(hash);
+            CHash160().Write(Span{script}.subspan(1)).Finalize(hash);
             script = CScript() << OP_DUP << OP_HASH160 << ToByteVector(hash) << OP_EQUALVERIFY << OP_CHECKSIG;
             scriptPubKey = CScript() << witnessversion << ToByteVector(hash);
         } else if (wm == WitnessMode::SH) {
@@ -923,7 +924,7 @@ BOOST_AUTO_TEST_CASE(script_build)
     }
 
 #ifdef UPDATE_JSON_TESTS
-    FILE* file = fopen("script_tests.json.gen", "w");
+    FILE* file = fsbridge::fopen("script_tests.json.gen", "w");
     fputs(strGen.c_str(), file);
     fclose(file);
 #endif
@@ -1473,7 +1474,7 @@ BOOST_AUTO_TEST_CASE(script_HasValidOps)
 static CMutableTransaction TxFromHex(const std::string& str)
 {
     CMutableTransaction tx;
-    VectorReader(SER_DISK, SERIALIZE_TRANSACTION_NO_WITNESS, ParseHex(str), 0) >> tx;
+    SpanReader{SER_DISK, SERIALIZE_TRANSACTION_NO_WITNESS, ParseHex(str)} >> tx;
     return tx;
 }
 
@@ -1483,7 +1484,7 @@ static std::vector<CTxOut> TxOutsFromJSON(const UniValue& univalue)
     std::vector<CTxOut> prevouts;
     for (size_t i = 0; i < univalue.size(); ++i) {
         CTxOut txout;
-        VectorReader(SER_DISK, 0, ParseHex(univalue[i].get_str()), 0) >> txout;
+        SpanReader{SER_DISK, 0, ParseHex(univalue[i].get_str())} >> txout;
         prevouts.push_back(std::move(txout));
     }
     return prevouts;
@@ -1520,7 +1521,7 @@ BOOST_AUTO_TEST_CASE(bitcoinconsensus_verify_script_returns_true)
     stream << spendTx;
 
     bitcoinconsensus_error err;
-    int result = bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), stream.data(), stream.size(), nIn, libconsensus_flags, &err);
+    int result = bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), UCharCast(stream.data()), stream.size(), nIn, libconsensus_flags, &err);
     BOOST_CHECK_EQUAL(result, 1);
     BOOST_CHECK_EQUAL(err, bitcoinconsensus_ERR_OK);
 }
@@ -1543,7 +1544,7 @@ BOOST_AUTO_TEST_CASE(bitcoinconsensus_verify_script_tx_index_err)
     stream << spendTx;
 
     bitcoinconsensus_error err;
-    int result = bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), stream.data(), stream.size(), nIn, libconsensus_flags, &err);
+    int result = bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), UCharCast(stream.data()), stream.size(), nIn, libconsensus_flags, &err);
     BOOST_CHECK_EQUAL(result, 0);
     BOOST_CHECK_EQUAL(err, bitcoinconsensus_ERR_TX_INDEX);
 }
@@ -1566,7 +1567,7 @@ BOOST_AUTO_TEST_CASE(bitcoinconsensus_verify_script_tx_size)
     stream << spendTx;
 
     bitcoinconsensus_error err;
-    int result = bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), stream.data(), stream.size() * 2, nIn, libconsensus_flags, &err);
+    int result = bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), UCharCast(stream.data()), stream.size() * 2, nIn, libconsensus_flags, &err);
     BOOST_CHECK_EQUAL(result, 0);
     BOOST_CHECK_EQUAL(err, bitcoinconsensus_ERR_TX_SIZE_MISMATCH);
 }
@@ -1589,7 +1590,7 @@ BOOST_AUTO_TEST_CASE(bitcoinconsensus_verify_script_tx_serialization)
     stream << 0xffffffff;
 
     bitcoinconsensus_error err;
-    int result = bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), stream.data(), stream.size(), nIn, libconsensus_flags, &err);
+    int result = bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), UCharCast(stream.data()), stream.size(), nIn, libconsensus_flags, &err);
     BOOST_CHECK_EQUAL(result, 0);
     BOOST_CHECK_EQUAL(err, bitcoinconsensus_ERR_TX_DESERIALIZE);
 }
@@ -1612,7 +1613,7 @@ BOOST_AUTO_TEST_CASE(bitcoinconsensus_verify_script_amount_required_err)
     stream << spendTx;
 
     bitcoinconsensus_error err;
-    int result = bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), stream.data(), stream.size(), nIn, libconsensus_flags, &err);
+    int result = bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), UCharCast(stream.data()), stream.size(), nIn, libconsensus_flags, &err);
     BOOST_CHECK_EQUAL(result, 0);
     BOOST_CHECK_EQUAL(err, bitcoinconsensus_ERR_AMOUNT_REQUIRED);
 }
@@ -1635,7 +1636,7 @@ BOOST_AUTO_TEST_CASE(bitcoinconsensus_verify_script_invalid_flags)
     stream << spendTx;
 
     bitcoinconsensus_error err;
-    int result = bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), stream.data(), stream.size(), nIn, libconsensus_flags, &err);
+    int result = bitcoinconsensus_verify_script(scriptPubKey.data(), scriptPubKey.size(), UCharCast(stream.data()), stream.size(), nIn, libconsensus_flags, &err);
     BOOST_CHECK_EQUAL(result, 0);
     BOOST_CHECK_EQUAL(err, bitcoinconsensus_ERR_INVALID_FLAGS);
 }
@@ -1727,7 +1728,7 @@ BOOST_AUTO_TEST_CASE(script_assets_test)
     bool exists = fs::exists(path);
     BOOST_WARN_MESSAGE(exists, "File $DIR_UNIT_TEST_DATA/script_assets_test.json not found, skipping script_assets_test");
     if (!exists) return;
-    fs::ifstream file(path);
+    std::ifstream file{path};
     BOOST_CHECK(file.is_open());
     file.seekg(0, std::ios::end);
     size_t length = file.tellg();
@@ -1754,7 +1755,7 @@ BOOST_AUTO_TEST_CASE(bip341_keypath_test_vectors)
     for (const auto& vec : vectors.getValues()) {
         auto txhex = ParseHex(vec["given"]["rawUnsignedTx"].get_str());
         CMutableTransaction tx;
-        VectorReader(SER_NETWORK, PROTOCOL_VERSION, txhex, 0) >> tx;
+        SpanReader{SER_NETWORK, PROTOCOL_VERSION, txhex} >> tx;
         std::vector<CTxOut> utxos;
         for (const auto& utxo_spent : vec["given"]["utxosSpent"].getValues()) {
             auto script_bytes = ParseHex(utxo_spent["scriptPubKey"].get_str());
@@ -1812,7 +1813,7 @@ BOOST_AUTO_TEST_CASE(bip341_keypath_test_vectors)
             BOOST_CHECK_EQUAL(HexStr(sighash), input["intermediary"]["sigHash"].get_str());
 
             // To verify the sigmsg, hash the expected sigmsg, and compare it with the (expected) sighash.
-            BOOST_CHECK_EQUAL(HexStr((CHashWriter(HASHER_TAPSIGHASH) << MakeSpan(ParseHex(input["intermediary"]["sigMsg"].get_str()))).GetSHA256()), input["intermediary"]["sigHash"].get_str());
+            BOOST_CHECK_EQUAL(HexStr((CHashWriter(HASHER_TAPSIGHASH) << Span{ParseHex(input["intermediary"]["sigMsg"].get_str())}).GetSHA256()), input["intermediary"]["sigHash"].get_str());
         }
 
     }

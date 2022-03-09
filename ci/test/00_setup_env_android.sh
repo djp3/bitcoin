@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Copyright (c) 2019-2020 The Bitcoin Core developers
+# Copyright (c) 2019-2021 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -16,7 +16,7 @@ export RUN_FUNCTIONAL_TESTS=false
 
 export ANDROID_API_LEVEL=28
 export ANDROID_BUILD_TOOLS_VERSION=28.0.3
-export ANDROID_NDK_VERSION=22.1.7171670
+export ANDROID_NDK_VERSION=23.1.7779620
 export ANDROID_TOOLS_URL=https://dl.google.com/android/repository/commandlinetools-linux-6609375_latest.zip
 export ANDROID_HOME="${DEPENDS_DIR}/SDKs/android"
 export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}"

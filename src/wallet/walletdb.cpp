@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -26,6 +26,7 @@
 #include <optional>
 #include <string>
 
+namespace wallet {
 namespace DBKeys {
 const std::string ACENTRY{"acentry"};
 const std::string ACTIVEEXTERNALSPK{"activeexternalspk"};
@@ -556,9 +557,9 @@ ReadKeyValue(CWallet* pwallet, CDataStream& ssKey, CDataStream& ssValue,
                 }
                 if (internal) {
                     chain.nVersion = CHDChain::VERSION_HD_CHAIN_SPLIT;
-                    chain.nInternalChainCounter = std::max(chain.nInternalChainCounter, index);
+                    chain.nInternalChainCounter = std::max(chain.nInternalChainCounter, index + 1);
                 } else {
-                    chain.nExternalChainCounter = std::max(chain.nExternalChainCounter, index);
+                    chain.nExternalChainCounter = std::max(chain.nExternalChainCounter, index + 1);
                 }
             }
         } else if (strType == DBKeys::WATCHMETA) {
@@ -787,7 +788,7 @@ DBErrors WalletBatch::LoadWallet(CWallet* pwallet)
 #ifndef ENABLE_EXTERNAL_SIGNER
         if (pwallet->IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER)) {
             pwallet->WalletLogPrintf("Error: External signer wallet being loaded without external signer support compiled\n");
-            return DBErrors::TOO_NEW;
+            return DBErrors::EXTERNAL_SIGNER_SUPPORT_REQUIRED;
         }
 #endif
 
@@ -1104,7 +1105,7 @@ std::unique_ptr<WalletDatabase> MakeDatabase(const fs::path& path, const Databas
 {
     bool exists;
     try {
-        exists = fs::symlink_status(path).type() != fs::file_not_found;
+        exists = fs::symlink_status(path).type() != fs::file_type::not_found;
     } catch (const fs::filesystem_error& e) {
         error = Untranslated(strprintf("Failed to access database path '%s': %s", fs::PathToString(path), fsbridge::get_filesystem_error_message(e)));
         status = DatabaseStatus::FAILED_BAD_PATH;
@@ -1194,3 +1195,4 @@ std::unique_ptr<WalletDatabase> CreateMockWalletDatabase()
     return std::make_unique<BerkeleyDatabase>(std::make_shared<BerkeleyEnvironment>(), "");
 #endif
 }
+} // namespace wallet

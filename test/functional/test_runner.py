@@ -138,7 +138,8 @@ BASE_SCRIPTS = [
     'feature_fee_estimation.py',
     'interface_zmq.py',
     'rpc_invalid_address_message.py',
-    'interface_bitcoin_cli.py',
+    'interface_bitcoin_cli.py --legacy-wallet',
+    'interface_bitcoin_cli.py --descriptors',
     'feature_bind_extra.py',
     'mempool_resurrect.py',
     'wallet_txn_doublespend.py --mineblock',
@@ -178,7 +179,8 @@ BASE_SCRIPTS = [
     'rpc_rawtransaction.py --legacy-wallet',
     'rpc_rawtransaction.py --descriptors',
     'wallet_groups.py --legacy-wallet',
-    'wallet_transactiontime_rescan.py',
+    'wallet_transactiontime_rescan.py --descriptors',
+    'wallet_transactiontime_rescan.py --legacy-wallet',
     'p2p_addrv2_relay.py',
     'wallet_groups.py --descriptors',
     'p2p_compactblocks_hb.py',
@@ -196,6 +198,7 @@ BASE_SCRIPTS = [
     'wallet_keypool.py --legacy-wallet',
     'wallet_keypool.py --descriptors',
     'wallet_descriptor.py --descriptors',
+    'feature_maxtipage.py',
     'p2p_nobloomfilter_messages.py',
     'p2p_filter.py',
     'rpc_setban.py',
@@ -215,9 +218,11 @@ BASE_SCRIPTS = [
     'wallet_txn_clone.py --mineblock',
     'feature_notifications.py',
     'rpc_getblockfilter.py',
+    'rpc_getblockfrompeer.py',
     'rpc_invalidateblock.py',
     'feature_utxo_set_hash.py',
-    'feature_rbf.py',
+    'feature_rbf.py --legacy-wallet',
+    'feature_rbf.py --descriptors',
     'mempool_packages.py',
     'mempool_package_onemore.py',
     'rpc_createmultisig.py --legacy-wallet',
@@ -253,6 +258,7 @@ BASE_SCRIPTS = [
     'wallet_bumpfee.py --descriptors',
     'wallet_implicitsegwit.py --legacy-wallet',
     'rpc_named_arguments.py',
+    'feature_startupnotify.py',
     'wallet_listsinceblock.py --legacy-wallet',
     'wallet_listsinceblock.py --descriptors',
     'wallet_listdescriptors.py --descriptors',
@@ -270,19 +276,23 @@ BASE_SCRIPTS = [
     'feature_minchainwork.py',
     'rpc_estimatefee.py',
     'rpc_getblockstats.py',
+    'feature_bind_port_externalip.py',
     'wallet_create_tx.py --legacy-wallet',
     'wallet_send.py --legacy-wallet',
     'wallet_send.py --descriptors',
     'wallet_create_tx.py --descriptors',
     'wallet_taproot.py',
+    'wallet_inactive_hdchains.py',
     'p2p_fingerprint.py',
     'feature_uacomment.py',
+    'feature_init.py',
     'wallet_coinbase_category.py --legacy-wallet',
     'wallet_coinbase_category.py --descriptors',
     'feature_filelock.py',
     'feature_loadblock.py',
     'p2p_dos_header_tree.py',
     'p2p_add_connections.py',
+    'feature_bind_port_discover.py',
     'p2p_unrequested_blocks.py',
     'p2p_blockfilters.py',
     'p2p_message_capture.py',
@@ -299,8 +309,10 @@ BASE_SCRIPTS = [
     'feature_txindex_compatibility.py',
     'feature_logging.py',
     'feature_anchors.py',
-    'feature_coinstatsindex.py',
+    'feature_coinstatsindex.py --legacy-wallet',
+    'feature_coinstatsindex.py --descriptors',
     'wallet_orphanedreward.py',
+    'wallet_timelock.py',
     'p2p_node_network_limited.py',
     'p2p_permissions.py',
     'feature_blocksdir.py',
@@ -310,7 +322,9 @@ BASE_SCRIPTS = [
     'feature_presegwit_node_upgrade.py',
     'feature_settings.py',
     'rpc_getdescriptorinfo.py',
+    'rpc_mempool_entry_fee_fields_deprecation.py',
     'rpc_help.py',
+    'feature_dirsymlinks.py',
     'feature_help.py',
     'feature_shutdown.py',
     'p2p_ibd_txrelay.py',
@@ -522,33 +536,39 @@ def run_tests(*, test_list, src_dir, build_dir, tmpdir, jobs=1, enable_coverage=
 
     max_len_name = len(max(test_list, key=len))
     test_count = len(test_list)
-    for i in range(test_count):
-        test_result, testdir, stdout, stderr = job_queue.get_next()
-        test_results.append(test_result)
-        done_str = "{}/{} - {}{}{}".format(i + 1, test_count, BOLD[1], test_result.name, BOLD[0])
-        if test_result.status == "Passed":
-            logging.debug("%s passed, Duration: %s s" % (done_str, test_result.time))
-        elif test_result.status == "Skipped":
-            logging.debug("%s skipped" % (done_str))
-        else:
-            print("%s failed, Duration: %s s\n" % (done_str, test_result.time))
-            print(BOLD[1] + 'stdout:\n' + BOLD[0] + stdout + '\n')
-            print(BOLD[1] + 'stderr:\n' + BOLD[0] + stderr + '\n')
-            if combined_logs_len and os.path.isdir(testdir):
-                # Print the final `combinedlogslen` lines of the combined logs
-                print('{}Combine the logs and print the last {} lines ...{}'.format(BOLD[1], combined_logs_len, BOLD[0]))
-                print('\n============')
-                print('{}Combined log for {}:{}'.format(BOLD[1], testdir, BOLD[0]))
-                print('============\n')
-                combined_logs_args = [sys.executable, os.path.join(tests_dir, 'combine_logs.py'), testdir]
-                if BOLD[0]:
-                    combined_logs_args += ['--color']
-                combined_logs, _ = subprocess.Popen(combined_logs_args, universal_newlines=True, stdout=subprocess.PIPE).communicate()
-                print("\n".join(deque(combined_logs.splitlines(), combined_logs_len)))
+    all_passed = True
+    i = 0
+    while i < test_count:
+        if failfast and not all_passed:
+            break
+        for test_result, testdir, stdout, stderr in job_queue.get_next():
+            test_results.append(test_result)
+            i += 1
+            done_str = "{}/{} - {}{}{}".format(i, test_count, BOLD[1], test_result.name, BOLD[0])
+            if test_result.status == "Passed":
+                logging.debug("%s passed, Duration: %s s" % (done_str, test_result.time))
+            elif test_result.status == "Skipped":
+                logging.debug("%s skipped" % (done_str))
+            else:
+                all_passed = False
+                print("%s failed, Duration: %s s\n" % (done_str, test_result.time))
+                print(BOLD[1] + 'stdout:\n' + BOLD[0] + stdout + '\n')
+                print(BOLD[1] + 'stderr:\n' + BOLD[0] + stderr + '\n')
+                if combined_logs_len and os.path.isdir(testdir):
+                    # Print the final `combinedlogslen` lines of the combined logs
+                    print('{}Combine the logs and print the last {} lines ...{}'.format(BOLD[1], combined_logs_len, BOLD[0]))
+                    print('\n============')
+                    print('{}Combined log for {}:{}'.format(BOLD[1], testdir, BOLD[0]))
+                    print('============\n')
+                    combined_logs_args = [sys.executable, os.path.join(tests_dir, 'combine_logs.py'), testdir]
+                    if BOLD[0]:
+                        combined_logs_args += ['--color']
+                    combined_logs, _ = subprocess.Popen(combined_logs_args, universal_newlines=True, stdout=subprocess.PIPE).communicate()
+                    print("\n".join(deque(combined_logs.splitlines(), combined_logs_len)))
 
-            if failfast:
-                logging.debug("Early exiting after test failure")
-                break
+                if failfast:
+                    logging.debug("Early exiting after test failure")
+                    break
 
     print_results(test_results, max_len_name, (int(time.time() - start_time)))
 
@@ -564,7 +584,7 @@ def run_tests(*, test_list, src_dir, build_dir, tmpdir, jobs=1, enable_coverage=
     if not os.listdir(tmpdir):
         os.rmdir(tmpdir)
 
-    all_passed = all(map(lambda test_result: test_result.was_successful, test_results)) and coverage_passed
+    all_passed = all_passed and coverage_passed
 
     # Clean up dangling processes if any. This may only happen with --failfast option.
     # Killing the process group will also terminate the current process but that is
@@ -642,8 +662,9 @@ class TestHandler:
 
         dot_count = 0
         while True:
-            # Return first proc that finishes
+            # Return all procs that have finished, if any. Otherwise sleep until there is one.
             time.sleep(.5)
+            ret = []
             for job in self.jobs:
                 (name, start_time, proc, testdir, log_out, log_err) = job
                 if proc.poll() is not None:
@@ -662,7 +683,9 @@ class TestHandler:
                         clearline = '\r' + (' ' * dot_count) + '\r'
                         print(clearline, end='', flush=True)
                     dot_count = 0
-                    return TestResult(name, status, int(time.time() - start_time)), testdir, stdout, stderr
+                    ret.append((TestResult(name, status, int(time.time() - start_time)), testdir, stdout, stderr))
+            if ret:
+                return ret
             if self.use_term_control:
                 print('.', end='', flush=True)
             dot_count += 1

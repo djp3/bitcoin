@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -9,6 +9,7 @@
 #include <key.h>
 #include <policy/policy.h>
 #include <primitives/transaction.h>
+#include <script/keyorigin.h>
 #include <script/signingprovider.h>
 #include <script/standard.h>
 #include <uint256.h>
@@ -167,12 +168,35 @@ static bool SignTaprootScript(const SigningProvider& provider, const BaseSignatu
 
     // <xonly pubkey> OP_CHECKSIG
     if (script.size() == 34 && script[33] == OP_CHECKSIG && script[0] == 0x20) {
-        XOnlyPubKey pubkey(MakeSpan(script).subspan(1, 32));
+        XOnlyPubKey pubkey{Span{script}.subspan(1, 32)};
         std::vector<unsigned char> sig;
         if (CreateTaprootScriptSig(creator, sigdata, provider, sig, pubkey, leaf_hash, sigversion)) {
             result = Vector(std::move(sig));
             return true;
         }
+        return false;
+    }
+
+    // multi_a scripts (<key> OP_CHECKSIG <key> OP_CHECKSIGADD <key> OP_CHECKSIGADD <k> OP_NUMEQUAL)
+    if (auto match = MatchMultiA(script)) {
+        std::vector<std::vector<unsigned char>> sigs;
+        int good_sigs = 0;
+        for (size_t i = 0; i < match->second.size(); ++i) {
+            XOnlyPubKey pubkey{*(match->second.rbegin() + i)};
+            std::vector<unsigned char> sig;
+            bool good_sig = CreateTaprootScriptSig(creator, sigdata, provider, sig, pubkey, leaf_hash, sigversion);
+            if (good_sig && good_sigs < match->first) {
+                ++good_sigs;
+                sigs.push_back(std::move(sig));
+            } else {
+                sigs.emplace_back();
+            }
+        }
+        if (good_sigs == match->first) {
+            result = std::move(sigs);
+            return true;
+        }
+        return false;
     }
 
     return false;
@@ -541,7 +565,7 @@ class DummySignatureChecker final : public BaseSignatureChecker
 public:
     DummySignatureChecker() {}
     bool CheckECDSASignature(const std::vector<unsigned char>& scriptSig, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const override { return true; }
-    bool CheckSchnorrSignature(Span<const unsigned char> sig, Span<const unsigned char> pubkey, SigVersion sigversion, const ScriptExecutionData& execdata, ScriptError* serror) const override { return true; }
+    bool CheckSchnorrSignature(Span<const unsigned char> sig, Span<const unsigned char> pubkey, SigVersion sigversion, ScriptExecutionData& execdata, ScriptError* serror) const override { return true; }
 };
 const DummySignatureChecker DUMMY_CHECKER;
 

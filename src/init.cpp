@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -34,6 +34,8 @@
 #include <net_processing.h>
 #include <netbase.h>
 #include <node/blockstorage.h>
+#include <node/caches.h>
+#include <node/chainstate.h>
 #include <node/context.h>
 #include <node/miner.h>
 #include <node/ui_interface.h>
@@ -70,10 +72,13 @@
 #include <validationinterface.h>
 #include <walletinitinterface.h>
 
+#include <condition_variable>
+#include <cstdint>
+#include <cstdio>
+#include <fstream>
 #include <functional>
 #include <set>
-#include <stdint.h>
-#include <stdio.h>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -92,6 +97,22 @@
 #include <zmq/zmqnotificationinterface.h>
 #include <zmq/zmqrpc.h>
 #endif
+
+using node::CacheSizes;
+using node::CalculateCacheSizes;
+using node::ChainstateLoadVerifyError;
+using node::ChainstateLoadingError;
+using node::CleanupBlockRevFiles;
+using node::DEFAULT_PRINTPRIORITY;
+using node::DEFAULT_STOPAFTERBLOCKIMPORT;
+using node::LoadChainstate;
+using node::NodeContext;
+using node::ThreadImport;
+using node::VerifyLoadedChainstate;
+using node::fHavePruned;
+using node::fPruneMode;
+using node::fReindex;
+using node::nPruneTarget;
 
 static const bool DEFAULT_PROXYRANDOMIZE = true;
 static const bool DEFAULT_REST_ENABLE = false;
@@ -114,12 +135,12 @@ static const char* BITCOIN_PID_FILENAME = "bitcoind.pid";
 
 static fs::path GetPidFile(const ArgsManager& args)
 {
-    return AbsPathForConfigVal(fs::PathFromString(args.GetArg("-pid", BITCOIN_PID_FILENAME)));
+    return AbsPathForConfigVal(args.GetPathArg("-pid", BITCOIN_PID_FILENAME));
 }
 
 [[nodiscard]] static bool CreatePidFile(const ArgsManager& args)
 {
-    fsbridge::ofstream file{GetPidFile(args)};
+    std::ofstream file{GetPidFile(args)};
     if (file) {
 #ifdef WIN32
         tfm::format(file, "%d\n", GetCurrentProcessId());
@@ -374,7 +395,7 @@ void SetupServerArgs(ArgsManager& argsman)
 
     argsman.AddArg("-version", "Print version and exit", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 #if HAVE_SYSTEM
-    argsman.AddArg("-alertnotify=<cmd>", "Execute command when a relevant alert is received or we see a really long fork (%s in cmd is replaced by message)", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-alertnotify=<cmd>", "Execute command when an alert is raised (%s in cmd is replaced by message)", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 #endif
     argsman.AddArg("-assumevalid=<hex>", strprintf("If this block is in the chain assume that it and its ancestors are valid and potentially skip their script verification (0 to verify all, default: %s, testnet: %s, signet: %s)", defaultChainParams->GetConsensus().defaultAssumeValid.GetHex(), testnetChainParams->GetConsensus().defaultAssumeValid.GetHex(), signetChainParams->GetConsensus().defaultAssumeValid.GetHex()), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-blocksdir=<dir>", "Specify directory to hold blocks subdirectory for *.dat files (default: <datadir>)", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -441,10 +462,12 @@ void SetupServerArgs(ArgsManager& argsman)
     argsman.AddArg("-onion=<ip:port>", "Use separate SOCKS5 proxy to reach peers via Tor onion services, set -noonion to disable (default: -proxy)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-i2psam=<ip:port>", "I2P SAM proxy to reach I2P peers and accept I2P connections (default: none)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-i2pacceptincoming", "If set and -i2psam is also set then incoming I2P connections are accepted via the SAM proxy. If this is not set but -i2psam is set then only outgoing connections will be made to the I2P network. Ignored if -i2psam is not set. Listening for incoming I2P connections is done through the SAM proxy, not by binding to a local address and port (default: 1)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
-    argsman.AddArg("-onlynet=<net>", "Make outgoing connections only through network <net> (" + Join(GetNetworkNames(), ", ") + "). Incoming connections are not affected by this option. This option can be specified multiple times to allow multiple networks. Warning: if it is used with non-onion networks and the -onion or -proxy option is set, then outbound onion connections will still be made; use -noonion or -onion=0 to disable outbound onion connections in this case.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-onlynet=<net>", "Make automatic outbound connections only to network <net> (" + Join(GetNetworkNames(), ", ") + "). Inbound and manual connections are not affected by this option. It can be specified multiple times to allow multiple networks.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-peerbloomfilters", strprintf("Support filtering of blocks and transaction with bloom filters (default: %u)", DEFAULT_PEERBLOOMFILTERS), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-peerblockfilters", strprintf("Serve compact block filters to peers per BIP 157 (default: %u)", DEFAULT_PEERBLOCKFILTERS), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-permitbaremultisig", strprintf("Relay non-P2SH multisig (default: %u)", DEFAULT_PERMIT_BAREMULTISIG), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    // TODO: remove the sentence "Nodes not using ... incoming connections." once the changes from
+    // https://github.com/bitcoin/bitcoin/pull/23542 have become widespread.
     argsman.AddArg("-port=<port>", strprintf("Listen for connections on <port>. Nodes not using the default ports (default: %u, testnet: %u, signet: %u, regtest: %u) are unlikely to get incoming connections. Not relevant for I2P (see doc/i2p.md).", defaultChainParams->GetDefaultPort(), testnetChainParams->GetDefaultPort(), signetChainParams->GetDefaultPort(), regtestChainParams->GetDefaultPort()), ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-proxy=<ip:port>", "Connect through SOCKS5 proxy, set -noproxy to disable (default: disabled)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-proxyrandomize", strprintf("Randomize credentials for every proxy connection. This enables Tor stream isolation (default: %u)", DEFAULT_PROXYRANDOMIZE), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -571,25 +594,6 @@ void SetupServerArgs(ArgsManager& argsman)
 
     // Add the hidden options
     argsman.AddHiddenArgs(hidden_args);
-}
-
-std::string LicenseInfo()
-{
-    const std::string URL_SOURCE_CODE = "<https://github.com/bitcoin/bitcoin>";
-
-    return CopyrightHolders(strprintf(_("Copyright (C) %i-%i").translated, 2009, COPYRIGHT_YEAR) + " ") + "\n" +
-           "\n" +
-           strprintf(_("Please contribute if you find %s useful. "
-                       "Visit %s for further information about the software.").translated,
-               PACKAGE_NAME, "<" PACKAGE_URL ">") +
-           "\n" +
-           strprintf(_("The source code is available from %s.").translated,
-               URL_SOURCE_CODE) +
-           "\n" +
-           "\n" +
-           _("This is experimental software.").translated + "\n" +
-           strprintf(_("Distributed under the MIT software license, see the accompanying file %s or %s").translated, "COPYING", "<https://opensource.org/licenses/MIT>") +
-           "\n";
 }
 
 static bool fHaveGenesis = false;
@@ -1113,7 +1117,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     auto opt_max_upload = ParseByteUnits(args.GetArg("-maxuploadtarget", DEFAULT_MAX_UPLOAD_TARGET), ByteUnit::M);
     if (!opt_max_upload) {
-        return InitError(strprintf(_("Unable to parse -maxuploadtarget: '%s' (possible integer overflow?)"), args.GetArg("-maxuploadtarget", "")));
+        return InitError(strprintf(_("Unable to parse -maxuploadtarget: '%s'"), args.GetArg("-maxuploadtarget", "")));
     }
 
     // ********************************************************* Step 4a: application initialization
@@ -1129,7 +1133,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     LogPrintf("Using at most %i automatic connections (%i file descriptors available)\n", nMaxConnections, nFD);
 
     // Warn about relative -datadir path.
-    if (args.IsArgSet("-datadir") && !fs::PathFromString(args.GetArg("-datadir", "")).is_absolute()) {
+    if (args.IsArgSet("-datadir") && !args.GetPathArg("-datadir").is_absolute()) {
         LogPrintf("Warning: relative datadir option '%s' specified, which will be interpreted relative to the " /* Continued */
                   "current working directory '%s'. This is fragile, because if bitcoin is started in the future "
                   "from a different location, it will be unable to locate the current data files. There could "
@@ -1225,10 +1229,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         // Read asmap file if configured
         std::vector<bool> asmap;
         if (args.IsArgSet("-asmap")) {
-            fs::path asmap_path = fs::PathFromString(args.GetArg("-asmap", ""));
-            if (asmap_path.empty()) {
-                asmap_path = fs::PathFromString(DEFAULT_ASMAP_FILENAME);
-            }
+            fs::path asmap_path = args.GetPathArg("-asmap", DEFAULT_ASMAP_FILENAME);
             if (!asmap_path.is_absolute()) {
                 asmap_path = gArgs.GetDataDirNet() / asmap_path;
             }
@@ -1315,27 +1316,27 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     // Check for host lookup allowed before parsing any network related parameters
     fNameLookup = args.GetBoolArg("-dns", DEFAULT_NAME_LOOKUP);
 
+    Proxy onion_proxy;
+
     bool proxyRandomize = args.GetBoolArg("-proxyrandomize", DEFAULT_PROXYRANDOMIZE);
     // -proxy sets a proxy for all outgoing network traffic
     // -noproxy (or -proxy=0) as well as the empty string can be used to not set a proxy, this is the default
     std::string proxyArg = args.GetArg("-proxy", "");
-    SetReachable(NET_ONION, false);
     if (proxyArg != "" && proxyArg != "0") {
         CService proxyAddr;
         if (!Lookup(proxyArg, proxyAddr, 9050, fNameLookup)) {
             return InitError(strprintf(_("Invalid -proxy address or hostname: '%s'"), proxyArg));
         }
 
-        proxyType addrProxy = proxyType(proxyAddr, proxyRandomize);
+        Proxy addrProxy = Proxy(proxyAddr, proxyRandomize);
         if (!addrProxy.IsValid())
             return InitError(strprintf(_("Invalid -proxy address or hostname: '%s'"), proxyArg));
 
         SetProxy(NET_IPV4, addrProxy);
         SetProxy(NET_IPV6, addrProxy);
-        SetProxy(NET_ONION, addrProxy);
         SetProxy(NET_CJDNS, addrProxy);
         SetNameProxy(addrProxy);
-        SetReachable(NET_ONION, true); // by default, -proxy sets onion as reachable, unless -noonion later
+        onion_proxy = addrProxy;
     }
 
     // -onion can be used to set only a proxy for .onion, or override normal proxy for .onion addresses
@@ -1344,18 +1345,26 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     std::string onionArg = args.GetArg("-onion", "");
     if (onionArg != "") {
         if (onionArg == "0") { // Handle -noonion/-onion=0
-            SetReachable(NET_ONION, false);
+            onion_proxy = Proxy{};
         } else {
-            CService onionProxy;
-            if (!Lookup(onionArg, onionProxy, 9050, fNameLookup)) {
+            CService addr;
+            if (!Lookup(onionArg, addr, 9050, fNameLookup) || !addr.IsValid()) {
                 return InitError(strprintf(_("Invalid -onion address or hostname: '%s'"), onionArg));
             }
-            proxyType addrOnion = proxyType(onionProxy, proxyRandomize);
-            if (!addrOnion.IsValid())
-                return InitError(strprintf(_("Invalid -onion address or hostname: '%s'"), onionArg));
-            SetProxy(NET_ONION, addrOnion);
-            SetReachable(NET_ONION, true);
+            onion_proxy = Proxy{addr, proxyRandomize};
         }
+    }
+
+    if (onion_proxy.IsValid()) {
+        SetProxy(NET_ONION, onion_proxy);
+    } else {
+        if (args.IsArgSet("-onlynet") && IsReachable(NET_ONION)) {
+            return InitError(
+                _("Outbound connections restricted to Tor (-onlynet=onion) but the proxy for "
+                  "reaching the Tor network is not provided (no -proxy= and no -onion= given) or "
+                  "it is explicitly forbidden (-onion=0)"));
+        }
+        SetReachable(NET_ONION, false);
     }
 
     for (const std::string& strAddr : args.GetArgs("-externalip")) {
@@ -1380,217 +1389,124 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     bool fReindexChainState = args.GetBoolArg("-reindex-chainstate", false);
 
     // cache size calculations
-    int64_t nTotalCache = (args.GetIntArg("-dbcache", nDefaultDbCache) << 20);
-    nTotalCache = std::max(nTotalCache, nMinDbCache << 20); // total cache cannot be less than nMinDbCache
-    nTotalCache = std::min(nTotalCache, nMaxDbCache << 20); // total cache cannot be greater than nMaxDbcache
-    int64_t nBlockTreeDBCache = std::min(nTotalCache / 8, nMaxBlockDBCache << 20);
-    nTotalCache -= nBlockTreeDBCache;
-    int64_t nTxIndexCache = std::min(nTotalCache / 8, args.GetBoolArg("-txindex", DEFAULT_TXINDEX) ? nMaxTxIndexCache << 20 : 0);
-    nTotalCache -= nTxIndexCache;
-    int64_t filter_index_cache = 0;
-    if (!g_enabled_filter_types.empty()) {
-        size_t n_indexes = g_enabled_filter_types.size();
-        int64_t max_cache = std::min(nTotalCache / 8, max_filter_index_cache << 20);
-        filter_index_cache = max_cache / n_indexes;
-        nTotalCache -= filter_index_cache * n_indexes;
-    }
-    int64_t nCoinDBCache = std::min(nTotalCache / 2, (nTotalCache / 4) + (1 << 23)); // use 25%-50% of the remainder for disk cache
-    nCoinDBCache = std::min(nCoinDBCache, nMaxCoinsDBCache << 20); // cap total coins db cache
-    nTotalCache -= nCoinDBCache;
-    int64_t nCoinCacheUsage = nTotalCache; // the rest goes to in-memory cache
+    CacheSizes cache_sizes = CalculateCacheSizes(args, g_enabled_filter_types.size());
+
     int64_t nMempoolSizeMax = args.GetIntArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000;
     LogPrintf("Cache configuration:\n");
-    LogPrintf("* Using %.1f MiB for block index database\n", nBlockTreeDBCache * (1.0 / 1024 / 1024));
+    LogPrintf("* Using %.1f MiB for block index database\n", cache_sizes.block_tree_db * (1.0 / 1024 / 1024));
     if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
-        LogPrintf("* Using %.1f MiB for transaction index database\n", nTxIndexCache * (1.0 / 1024 / 1024));
+        LogPrintf("* Using %.1f MiB for transaction index database\n", cache_sizes.tx_index * (1.0 / 1024 / 1024));
     }
     for (BlockFilterType filter_type : g_enabled_filter_types) {
         LogPrintf("* Using %.1f MiB for %s block filter index database\n",
-                  filter_index_cache * (1.0 / 1024 / 1024), BlockFilterTypeName(filter_type));
+                  cache_sizes.filter_index * (1.0 / 1024 / 1024), BlockFilterTypeName(filter_type));
     }
-    LogPrintf("* Using %.1f MiB for chain state database\n", nCoinDBCache * (1.0 / 1024 / 1024));
-    LogPrintf("* Using %.1f MiB for in-memory UTXO set (plus up to %.1f MiB of unused mempool space)\n", nCoinCacheUsage * (1.0 / 1024 / 1024), nMempoolSizeMax * (1.0 / 1024 / 1024));
+    LogPrintf("* Using %.1f MiB for chain state database\n", cache_sizes.coins_db * (1.0 / 1024 / 1024));
+    LogPrintf("* Using %.1f MiB for in-memory UTXO set (plus up to %.1f MiB of unused mempool space)\n", cache_sizes.coins * (1.0 / 1024 / 1024), nMempoolSizeMax * (1.0 / 1024 / 1024));
 
     bool fLoaded = false;
     while (!fLoaded && !ShutdownRequested()) {
         const bool fReset = fReindex;
-        auto is_coinsview_empty = [&](CChainState* chainstate) EXCLUSIVE_LOCKS_REQUIRED(::cs_main) {
-            return fReset || fReindexChainState || chainstate->CoinsTip().GetBestBlock().IsNull();
-        };
         bilingual_str strLoadError;
 
         uiInterface.InitMessage(_("Loading block index…").translated);
-
-        do {
-            const int64_t load_block_index_start_time = GetTimeMillis();
-            try {
-                LOCK(cs_main);
-                chainman.InitializeChainstate(Assert(node.mempool.get()));
-                chainman.m_total_coinstip_cache = nCoinCacheUsage;
-                chainman.m_total_coinsdb_cache = nCoinDBCache;
-
-                UnloadBlockIndex(node.mempool.get(), chainman);
-
-                auto& pblocktree{chainman.m_blockman.m_block_tree_db};
-                // new CBlockTreeDB tries to delete the existing file, which
-                // fails if it's still open from the previous loop. Close it first:
-                pblocktree.reset();
-                pblocktree.reset(new CBlockTreeDB(nBlockTreeDBCache, false, fReset));
-
-                if (fReset) {
-                    pblocktree->WriteReindexing(true);
-                    //If we're reindexing in prune mode, wipe away unusable block files and all undo data files
-                    if (fPruneMode)
-                        CleanupBlockRevFiles();
-                }
-
-                if (ShutdownRequested()) break;
-
-                // LoadBlockIndex will load fHavePruned if we've ever removed a
-                // block file from disk.
-                // Note that it also sets fReindex based on the disk flag!
-                // From here on out fReindex and fReset mean something different!
-                if (!chainman.LoadBlockIndex()) {
-                    if (ShutdownRequested()) break;
-                    strLoadError = _("Error loading block database");
-                    break;
-                }
-
+        const int64_t load_block_index_start_time = GetTimeMillis();
+        std::optional<ChainstateLoadingError> maybe_load_error;
+        try {
+            maybe_load_error = LoadChainstate(fReset,
+                                              chainman,
+                                              Assert(node.mempool.get()),
+                                              fPruneMode,
+                                              chainparams.GetConsensus(),
+                                              fReindexChainState,
+                                              cache_sizes.block_tree_db,
+                                              cache_sizes.coins_db,
+                                              cache_sizes.coins,
+                                              /*block_tree_db_in_memory=*/false,
+                                              /*coins_db_in_memory=*/false,
+                                              /*shutdown_requested=*/ShutdownRequested,
+                                              /*coins_error_cb=*/[]() {
+                                                  uiInterface.ThreadSafeMessageBox(
+                                                                                   _("Error reading from database, shutting down."),
+                                                                                   "", CClientUIInterface::MSG_ERROR);
+                                              });
+        } catch (const std::exception& e) {
+            LogPrintf("%s\n", e.what());
+            maybe_load_error = ChainstateLoadingError::ERROR_GENERIC_BLOCKDB_OPEN_FAILED;
+        }
+        if (maybe_load_error.has_value()) {
+            switch (maybe_load_error.value()) {
+            case ChainstateLoadingError::ERROR_LOADING_BLOCK_DB:
+                strLoadError = _("Error loading block database");
+                break;
+            case ChainstateLoadingError::ERROR_BAD_GENESIS_BLOCK:
                 // If the loaded chain has a wrong genesis, bail out immediately
                 // (we're likely using a testnet datadir, or the other way around).
-                if (!chainman.BlockIndex().empty() &&
-                        !chainman.m_blockman.LookupBlockIndex(chainparams.GetConsensus().hashGenesisBlock)) {
-                    return InitError(_("Incorrect or no genesis block found. Wrong datadir for network?"));
-                }
-
-                // Check for changed -prune state.  What we are concerned about is a user who has pruned blocks
-                // in the past, but is now trying to run unpruned.
-                if (fHavePruned && !fPruneMode) {
-                    strLoadError = _("You need to rebuild the database using -reindex to go back to unpruned mode.  This will redownload the entire blockchain");
-                    break;
-                }
-
-                // At this point blocktree args are consistent with what's on disk.
-                // If we're not mid-reindex (based on disk + args), add a genesis block on disk
-                // (otherwise we use the one already on disk).
-                // This is called again in ThreadImport after the reindex completes.
-                if (!fReindex && !chainman.ActiveChainstate().LoadGenesisBlock()) {
-                    strLoadError = _("Error initializing block database");
-                    break;
-                }
-
-                // At this point we're either in reindex or we've loaded a useful
-                // block tree into BlockIndex()!
-
-                bool failed_chainstate_init = false;
-
-                for (CChainState* chainstate : chainman.GetAll()) {
-                    chainstate->InitCoinsDB(
-                        /* cache_size_bytes */ nCoinDBCache,
-                        /* in_memory */ false,
-                        /* should_wipe */ fReset || fReindexChainState);
-
-                    chainstate->CoinsErrorCatcher().AddReadErrCallback([]() {
-                        uiInterface.ThreadSafeMessageBox(
-                            _("Error reading from database, shutting down."),
-                            "", CClientUIInterface::MSG_ERROR);
-                    });
-
-                    // If necessary, upgrade from older database format.
-                    // This is a no-op if we cleared the coinsviewdb with -reindex or -reindex-chainstate
-                    if (!chainstate->CoinsDB().Upgrade()) {
-                        strLoadError = _("Error upgrading chainstate database");
-                        failed_chainstate_init = true;
-                        break;
-                    }
-
-                    // ReplayBlocks is a no-op if we cleared the coinsviewdb with -reindex or -reindex-chainstate
-                    if (!chainstate->ReplayBlocks()) {
-                        strLoadError = _("Unable to replay blocks. You will need to rebuild the database using -reindex-chainstate.");
-                        failed_chainstate_init = true;
-                        break;
-                    }
-
-                    // The on-disk coinsdb is now in a good state, create the cache
-                    chainstate->InitCoinsCache(nCoinCacheUsage);
-                    assert(chainstate->CanFlushToDisk());
-
-                    if (!is_coinsview_empty(chainstate)) {
-                        // LoadChainTip initializes the chain based on CoinsTip()'s best block
-                        if (!chainstate->LoadChainTip()) {
-                            strLoadError = _("Error initializing block database");
-                            failed_chainstate_init = true;
-                            break; // out of the per-chainstate loop
-                        }
-                        assert(chainstate->m_chain.Tip() != nullptr);
-                    }
-                }
-
-                if (failed_chainstate_init) {
-                    break; // out of the chainstate activation do-while
-                }
-            } catch (const std::exception& e) {
-                LogPrintf("%s\n", e.what());
+                return InitError(_("Incorrect or no genesis block found. Wrong datadir for network?"));
+            case ChainstateLoadingError::ERROR_PRUNED_NEEDS_REINDEX:
+                strLoadError = _("You need to rebuild the database using -reindex to go back to unpruned mode.  This will redownload the entire blockchain");
+                break;
+            case ChainstateLoadingError::ERROR_LOAD_GENESIS_BLOCK_FAILED:
+                strLoadError = _("Error initializing block database");
+                break;
+            case ChainstateLoadingError::ERROR_CHAINSTATE_UPGRADE_FAILED:
+                strLoadError = _("Error upgrading chainstate database");
+                break;
+            case ChainstateLoadingError::ERROR_REPLAYBLOCKS_FAILED:
+                strLoadError = _("Unable to replay blocks. You will need to rebuild the database using -reindex-chainstate.");
+                break;
+            case ChainstateLoadingError::ERROR_LOADCHAINTIP_FAILED:
+                strLoadError = _("Error initializing block database");
+                break;
+            case ChainstateLoadingError::ERROR_GENERIC_BLOCKDB_OPEN_FAILED:
                 strLoadError = _("Error opening block database");
                 break;
+            case ChainstateLoadingError::ERROR_BLOCKS_WITNESS_INSUFFICIENTLY_VALIDATED:
+                strLoadError = strprintf(_("Witness data for blocks after height %d requires validation. Please restart with -reindex."),
+                                         chainparams.GetConsensus().SegwitHeight);
+                break;
+            case ChainstateLoadingError::SHUTDOWN_PROBED:
+                break;
             }
-
-            if (!fReset) {
-                LOCK(cs_main);
-                auto chainstates{chainman.GetAll()};
-                if (std::any_of(chainstates.begin(), chainstates.end(),
-                                [](const CChainState* cs) EXCLUSIVE_LOCKS_REQUIRED(cs_main) { return cs->NeedsRedownload(); })) {
-                    strLoadError = strprintf(_("Witness data for blocks after height %d requires validation. Please restart with -reindex."),
-                                             chainparams.GetConsensus().SegwitHeight);
-                    break;
-                }
-            }
-
-            bool failed_verification = false;
-
+        } else {
+            std::optional<ChainstateLoadVerifyError> maybe_verify_error;
             try {
-                LOCK(cs_main);
-
-                for (CChainState* chainstate : chainman.GetAll()) {
-                    if (!is_coinsview_empty(chainstate)) {
-                        uiInterface.InitMessage(_("Verifying blocks…").translated);
-                        if (fHavePruned && args.GetIntArg("-checkblocks", DEFAULT_CHECKBLOCKS) > MIN_BLOCKS_TO_KEEP) {
-                            LogPrintf("Prune: pruned datadir may not have more than %d blocks; only checking available blocks\n",
-                                MIN_BLOCKS_TO_KEEP);
-                        }
-
-                        const CBlockIndex* tip = chainstate->m_chain.Tip();
-                        RPCNotifyBlockChange(tip);
-                        if (tip && tip->nTime > GetAdjustedTime() + 2 * 60 * 60) {
-                            strLoadError = _("The block database contains a block which appears to be from the future. "
-                                    "This may be due to your computer's date and time being set incorrectly. "
-                                    "Only rebuild the block database if you are sure that your computer's date and time are correct");
-                            failed_verification = true;
-                            break;
-                        }
-
-                        if (!CVerifyDB().VerifyDB(
-                                *chainstate, chainparams, chainstate->CoinsDB(),
-                                args.GetIntArg("-checklevel", DEFAULT_CHECKLEVEL),
-                                args.GetIntArg("-checkblocks", DEFAULT_CHECKBLOCKS))) {
-                            strLoadError = _("Corrupted block database detected");
-                            failed_verification = true;
-                            break;
-                        }
-                    }
+                uiInterface.InitMessage(_("Verifying blocks…").translated);
+                auto check_blocks = args.GetIntArg("-checkblocks", DEFAULT_CHECKBLOCKS);
+                if (fHavePruned && check_blocks > MIN_BLOCKS_TO_KEEP) {
+                    LogPrintf("Prune: pruned datadir may not have more than %d blocks; only checking available blocks\n",
+                              MIN_BLOCKS_TO_KEEP);
                 }
+                maybe_verify_error = VerifyLoadedChainstate(chainman,
+                                                            fReset,
+                                                            fReindexChainState,
+                                                            chainparams.GetConsensus(),
+                                                            check_blocks,
+                                                            args.GetIntArg("-checklevel", DEFAULT_CHECKLEVEL),
+                                                            /*get_unix_time_seconds=*/static_cast<int64_t(*)()>(GetTime));
             } catch (const std::exception& e) {
                 LogPrintf("%s\n", e.what());
-                strLoadError = _("Error opening block database");
-                failed_verification = true;
-                break;
+                maybe_verify_error = ChainstateLoadVerifyError::ERROR_GENERIC_FAILURE;
             }
-
-            if (!failed_verification) {
+            if (maybe_verify_error.has_value()) {
+                switch (maybe_verify_error.value()) {
+                case ChainstateLoadVerifyError::ERROR_BLOCK_FROM_FUTURE:
+                    strLoadError = _("The block database contains a block which appears to be from the future. "
+                                     "This may be due to your computer's date and time being set incorrectly. "
+                                     "Only rebuild the block database if you are sure that your computer's date and time are correct");
+                    break;
+                case ChainstateLoadVerifyError::ERROR_CORRUPTED_BLOCK_DB:
+                    strLoadError = _("Corrupted block database detected");
+                    break;
+                case ChainstateLoadVerifyError::ERROR_GENERIC_FAILURE:
+                    strLoadError = _("Error opening block database");
+                    break;
+                }
+            } else {
                 fLoaded = true;
                 LogPrintf(" block index %15dms\n", GetTimeMillis() - load_block_index_start_time);
             }
-        } while(false);
+        }
 
         if (!fLoaded && !ShutdownRequested()) {
             // first suggest a reindex
@@ -1626,14 +1542,14 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
             return InitError(*error);
         }
 
-        g_txindex = std::make_unique<TxIndex>(nTxIndexCache, false, fReindex);
+        g_txindex = std::make_unique<TxIndex>(cache_sizes.tx_index, false, fReindex);
         if (!g_txindex->Start(chainman.ActiveChainstate())) {
             return false;
         }
     }
 
     for (const auto& filter_type : g_enabled_filter_types) {
-        InitBlockFilterIndex(filter_type, filter_index_cache, false, fReindex);
+        InitBlockFilterIndex(filter_type, cache_sizes.filter_index, false, fReindex);
         if (!GetBlockFilterIndex(filter_type)->Start(chainman.ActiveChainstate())) {
             return false;
         }
@@ -1749,8 +1665,6 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     LogPrintf("nBestHeight = %d\n", chain_active_height);
     if (node.peerman) node.peerman->SetBestHeight(chain_active_height);
 
-    Discover();
-
     // Map ports with UPnP or NAT-PMP.
     StartMapPort(args.GetBoolArg("-upnp", DEFAULT_UPNP), gArgs.GetBoolArg("-natpmp", DEFAULT_NATPMP));
 
@@ -1770,12 +1684,27 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     connOptions.nMaxOutboundLimit = *opt_max_upload;
     connOptions.m_peer_connect_timeout = peer_connect_timeout;
 
+    // Port to bind to if `-bind=addr` is provided without a `:port` suffix.
+    const uint16_t default_bind_port =
+        static_cast<uint16_t>(args.GetIntArg("-port", Params().GetDefaultPort()));
+
+    const auto BadPortWarning = [](const char* prefix, uint16_t port) {
+        return strprintf(_("%s request to listen on port %u. This port is considered \"bad\" and "
+                           "thus it is unlikely that any Bitcoin Core peers connect to it. See "
+                           "doc/p2p-bad-ports.md for details and a full list."),
+                         prefix,
+                         port);
+    };
+
     for (const std::string& bind_arg : args.GetArgs("-bind")) {
         CService bind_addr;
         const size_t index = bind_arg.rfind('=');
         if (index == std::string::npos) {
-            if (Lookup(bind_arg, bind_addr, GetListenPort(), false)) {
+            if (Lookup(bind_arg, bind_addr, default_bind_port, /*fAllowLookup=*/false)) {
                 connOptions.vBinds.push_back(bind_addr);
+                if (IsBadPort(bind_addr.GetPort())) {
+                    InitWarning(BadPortWarning("-bind", bind_addr.GetPort()));
+                }
                 continue;
             }
         } else {
@@ -1802,6 +1731,15 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     // on any address - 0.0.0.0 (IPv4) and :: (IPv6).
     connOptions.bind_on_any = args.GetArgs("-bind").empty() && args.GetArgs("-whitebind").empty();
 
+    // Emit a warning if a bad port is given to -port= but only if -bind and -whitebind are not
+    // given, because if they are, then -port= is ignored.
+    if (connOptions.bind_on_any && args.IsArgSet("-port")) {
+        const uint16_t port_arg = args.GetIntArg("-port", 0);
+        if (IsBadPort(port_arg)) {
+            InitWarning(BadPortWarning("-port", port_arg));
+        }
+    }
+
     CService onion_service_target;
     if (!connOptions.onion_binds.empty()) {
         onion_service_target = connOptions.onion_binds.front();
@@ -1817,6 +1755,12 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                                   onion_service_target.ToStringIPPort()));
         }
         StartTorControl(onion_service_target);
+    }
+
+    if (connOptions.bind_on_any) {
+        // Only add all IP addresses of the machine if we would be listening on
+        // any address - 0.0.0.0 (IPv4) and :: (IPv6).
+        Discover();
     }
 
     for (const auto& net : args.GetArgs("-whitelist")) {
@@ -1843,8 +1787,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         if (!Lookup(i2psam_arg, addr, 7656, fNameLookup) || !addr.IsValid()) {
             return InitError(strprintf(_("Invalid -i2psam address or hostname: '%s'"), i2psam_arg));
         }
-        SetReachable(NET_I2P, true);
-        SetProxy(NET_I2P, proxyType{addr});
+        SetProxy(NET_I2P, Proxy{addr});
     } else {
         SetReachable(NET_I2P, false);
     }
@@ -1857,7 +1800,17 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     // ********************************************************* Step 13: finished
 
+    // At this point, the RPC is "started", but still in warmup, which means it
+    // cannot yet be called. Before we make it callable, we need to make sure
+    // that the RPC's view of the best block is valid and consistent with
+    // ChainstateManager's ActiveTip.
+    //
+    // If we do not do this, RPC's view of the best block will be height=0 and
+    // hash=0x0. This will lead to erroroneous responses for things like
+    // waitforblockheight.
+    RPCNotifyBlockChange(chainman.ActiveTip());
     SetRPCWarmupFinished();
+
     uiInterface.InitMessage(_("Done loading").translated);
 
     for (const auto& client : node.chain_clients) {

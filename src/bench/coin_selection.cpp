@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2020 The Bitcoin Core developers
+// Copyright (c) 2012-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -10,6 +10,19 @@
 #include <wallet/wallet.h>
 
 #include <set>
+
+using node::NodeContext;
+using wallet::AttemptSelection;
+using wallet::CInputCoin;
+using wallet::COutput;
+using wallet::CWallet;
+using wallet::CWalletTx;
+using wallet::CoinEligibilityFilter;
+using wallet::CoinSelectionParams;
+using wallet::CreateDummyWalletDatabase;
+using wallet::OutputGroup;
+using wallet::SelectCoinsBnB;
+using wallet::TxStateInactive;
 
 static void addCoin(const CAmount& nValue, const CWallet& wallet, std::vector<std::unique_ptr<CWalletTx>>& wtxs)
 {
@@ -54,12 +67,10 @@ static void CoinSelection(benchmark::Bench& bench)
                                                     /* long_term_feerate= */ CFeeRate(0), /* discard_feerate= */ CFeeRate(0),
                                                     /* tx_noinputs_size= */ 0, /* avoid_partial= */ false);
     bench.run([&] {
-        std::set<CInputCoin> setCoinsRet;
-        CAmount nValueRet;
-        bool success = AttemptSelection(wallet, 1003 * COIN, filter_standard, coins, setCoinsRet, nValueRet, coin_selection_params);
-        assert(success);
-        assert(nValueRet == 1003 * COIN);
-        assert(setCoinsRet.size() == 2);
+        auto result = AttemptSelection(wallet, 1003 * COIN, filter_standard, coins, coin_selection_params);
+        assert(result);
+        assert(result->GetSelectedValue() == 1003 * COIN);
+        assert(result->GetInputSet().size() == 2);
     });
 }
 
@@ -92,17 +103,14 @@ static void BnBExhaustion(benchmark::Bench& bench)
 {
     // Setup
     std::vector<OutputGroup> utxo_pool;
-    CoinSet selection;
-    CAmount value_ret = 0;
 
     bench.run([&] {
         // Benchmark
         CAmount target = make_hard_case(17, utxo_pool);
-        SelectCoinsBnB(utxo_pool, target, 0, selection, value_ret); // Should exhaust
+        SelectCoinsBnB(utxo_pool, target, 0); // Should exhaust
 
         // Cleanup
         utxo_pool.clear();
-        selection.clear();
     });
 }
 

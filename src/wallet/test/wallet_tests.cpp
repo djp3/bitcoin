@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2020 The Bitcoin Core developers
+// Copyright (c) 2012-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -30,6 +30,10 @@
 #include <boost/test/unit_test.hpp>
 #include <univalue.h>
 
+using node::MAX_BLOCKFILE_SIZE;
+using node::UnlinkPrunedFiles;
+
+namespace wallet {
 RPCHelpMan importmulti();
 RPCHelpMan dumpwallet();
 RPCHelpMan importwallet();
@@ -92,7 +96,7 @@ BOOST_FIXTURE_TEST_CASE(scan_for_wallet_transactions, TestChain100Setup)
 {
     // Cap last block file size, and mine new block in a new block file.
     CBlockIndex* oldTip = m_node.chainman->ActiveChain().Tip();
-    GetBlockFileInfo(oldTip->GetBlockPos().nFile)->nSize = MAX_BLOCKFILE_SIZE;
+    WITH_LOCK(::cs_main, m_node.chainman->m_blockman.GetBlockFileInfo(oldTip->GetBlockPos().nFile)->nSize = MAX_BLOCKFILE_SIZE);
     CreateAndProcessBlock({}, GetScriptForRawPubKey(coinbaseKey.GetPubKey()));
     CBlockIndex* newTip = m_node.chainman->ActiveChain().Tip();
 
@@ -136,11 +140,13 @@ BOOST_FIXTURE_TEST_CASE(scan_for_wallet_transactions, TestChain100Setup)
     }
 
     // Prune the older block file.
+    int file_number;
     {
         LOCK(cs_main);
-        Assert(m_node.chainman)->m_blockman.PruneOneBlockFile(oldTip->GetBlockPos().nFile);
+        file_number = oldTip->GetBlockPos().nFile;
+        Assert(m_node.chainman)->m_blockman.PruneOneBlockFile(file_number);
     }
-    UnlinkPrunedFiles({oldTip->GetBlockPos().nFile});
+    UnlinkPrunedFiles({file_number});
 
     // Verify ScanForWalletTransactions only picks transactions in the new block
     // file.
@@ -165,9 +171,10 @@ BOOST_FIXTURE_TEST_CASE(scan_for_wallet_transactions, TestChain100Setup)
     // Prune the remaining block file.
     {
         LOCK(cs_main);
-        Assert(m_node.chainman)->m_blockman.PruneOneBlockFile(newTip->GetBlockPos().nFile);
+        file_number = newTip->GetBlockPos().nFile;
+        Assert(m_node.chainman)->m_blockman.PruneOneBlockFile(file_number);
     }
-    UnlinkPrunedFiles({newTip->GetBlockPos().nFile});
+    UnlinkPrunedFiles({file_number});
 
     // Verify ScanForWalletTransactions scans no blocks.
     {
@@ -193,16 +200,18 @@ BOOST_FIXTURE_TEST_CASE(importmulti_rescan, TestChain100Setup)
 {
     // Cap last block file size, and mine new block in a new block file.
     CBlockIndex* oldTip = m_node.chainman->ActiveChain().Tip();
-    GetBlockFileInfo(oldTip->GetBlockPos().nFile)->nSize = MAX_BLOCKFILE_SIZE;
+    WITH_LOCK(::cs_main, m_node.chainman->m_blockman.GetBlockFileInfo(oldTip->GetBlockPos().nFile)->nSize = MAX_BLOCKFILE_SIZE);
     CreateAndProcessBlock({}, GetScriptForRawPubKey(coinbaseKey.GetPubKey()));
     CBlockIndex* newTip = m_node.chainman->ActiveChain().Tip();
 
     // Prune the older block file.
+    int file_number;
     {
         LOCK(cs_main);
-        Assert(m_node.chainman)->m_blockman.PruneOneBlockFile(oldTip->GetBlockPos().nFile);
+        file_number = oldTip->GetBlockPos().nFile;
+        Assert(m_node.chainman)->m_blockman.PruneOneBlockFile(file_number);
     }
-    UnlinkPrunedFiles({oldTip->GetBlockPos().nFile});
+    UnlinkPrunedFiles({file_number});
 
     // Verify importmulti RPC returns failure for a key whose creation time is
     // before the missing block, and success for a key whose creation time is
@@ -289,7 +298,7 @@ BOOST_FIXTURE_TEST_CASE(importwallet_rescan, TestChain100Setup)
         request.params.setArray();
         request.params.push_back(backup_file);
 
-        ::dumpwallet().HandleRequest(request);
+        wallet::dumpwallet().HandleRequest(request);
         RemoveWallet(context, wallet, /* load_on_start= */ std::nullopt);
     }
 
@@ -308,7 +317,7 @@ BOOST_FIXTURE_TEST_CASE(importwallet_rescan, TestChain100Setup)
         request.params.push_back(backup_file);
         AddWallet(context, wallet);
         wallet->SetLastBlockProcessed(m_node.chainman->ActiveChain().Height(), m_node.chainman->ActiveChain().Tip()->GetBlockHash());
-        ::importwallet().HandleRequest(request);
+        wallet::importwallet().HandleRequest(request);
         RemoveWallet(context, wallet, /* load_on_start= */ std::nullopt);
 
         BOOST_CHECK_EQUAL(wallet->mapWallet.size(), 3U);
@@ -358,10 +367,10 @@ static int64_t AddTx(ChainstateManager& chainman, CWallet& wallet, uint32_t lock
     CBlockIndex* block = nullptr;
     if (blockTime > 0) {
         LOCK(cs_main);
-        auto inserted = chainman.BlockIndex().emplace(GetRandHash(), new CBlockIndex);
+        auto inserted = chainman.BlockIndex().emplace(std::piecewise_construct, std::make_tuple(GetRandHash()), std::make_tuple());
         assert(inserted.second);
         const uint256& hash = inserted.first->first;
-        block = inserted.first->second;
+        block = &inserted.first->second;
         block->nTime = blockTime;
         block->phashBlock = &hash;
         state = TxStateConfirmed{hash, block->nHeight, /*position_in_block=*/0};
@@ -417,7 +426,7 @@ BOOST_AUTO_TEST_CASE(LoadReceiveRequests)
 
 // Test some watch-only LegacyScriptPubKeyMan methods by the procedure of loading (LoadWatchOnly),
 // checking (HaveWatchOnly), getting (GetWatchPubKey) and removing (RemoveWatchOnly) a
-// given PubKey, resp. its corresponding P2PK Script. Results of the the impact on
+// given PubKey, resp. its corresponding P2PK Script. Results of the impact on
 // the address -> PubKey map is dependent on whether the PubKey is a point on the curve
 static void TestWatchOnlyPubKey(LegacyScriptPubKeyMan* spk_man, const CPubKey& add_pubkey)
 {
@@ -682,7 +691,7 @@ BOOST_FIXTURE_TEST_CASE(wallet_descriptor_test, BasicTestingSetup)
     vw << (int32_t)0;
     vw << (int32_t)1;
 
-    VectorReader vr(0, 0, malformed_record, 0);
+    SpanReader vr{0, 0, malformed_record};
     WalletDescriptor w_desc;
     BOOST_CHECK_EXCEPTION(vr >> w_desc, std::ios_base::failure, malformed_descriptor);
 }
@@ -779,18 +788,14 @@ BOOST_FIXTURE_TEST_CASE(CreateWallet, TestChain100Setup)
     // deadlock during the sync and simulates a new block notification happening
     // as soon as possible.
     addtx_count = 0;
-    auto handler = HandleLoadWallet(context, [&](std::unique_ptr<interfaces::Wallet> wallet) EXCLUSIVE_LOCKS_REQUIRED(wallet->wallet()->cs_wallet, context.wallets_mutex) {
+    auto handler = HandleLoadWallet(context, [&](std::unique_ptr<interfaces::Wallet> wallet) {
             BOOST_CHECK(rescan_completed);
             m_coinbase_txns.push_back(CreateAndProcessBlock({}, GetScriptForRawPubKey(coinbaseKey.GetPubKey())).vtx[0]);
             block_tx = TestSimpleSpend(*m_coinbase_txns[2], 0, coinbaseKey, GetScriptForRawPubKey(key.GetPubKey()));
             m_coinbase_txns.push_back(CreateAndProcessBlock({block_tx}, GetScriptForRawPubKey(coinbaseKey.GetPubKey())).vtx[0]);
             mempool_tx = TestSimpleSpend(*m_coinbase_txns[3], 0, coinbaseKey, GetScriptForRawPubKey(key.GetPubKey()));
             BOOST_CHECK(m_node.chain->broadcastTransaction(MakeTransactionRef(mempool_tx), DEFAULT_TRANSACTION_MAXFEE, false, error));
-            LEAVE_CRITICAL_SECTION(context.wallets_mutex);
-            LEAVE_CRITICAL_SECTION(wallet->wallet()->cs_wallet);
             SyncWithValidationInterfaceQueue();
-            ENTER_CRITICAL_SECTION(wallet->wallet()->cs_wallet);
-            ENTER_CRITICAL_SECTION(context.wallets_mutex);
         });
     wallet = TestLoadWallet(context);
     BOOST_CHECK_EQUAL(addtx_count, 4);
@@ -850,3 +855,4 @@ BOOST_FIXTURE_TEST_CASE(ZapSelectTx, TestChain100Setup)
 }
 
 BOOST_AUTO_TEST_SUITE_END()
+} // namespace wallet

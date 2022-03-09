@@ -6,7 +6,7 @@ template to create the initial release notes draft.*
 for the process.*
 
 *Create the draft, named* "*version* Release Notes Draft"
-*(e.g. "22.0 Release Notes Draft"), as a collaborative wiki in:*
+*(e.g. "23.0 Release Notes Draft"), as a collaborative wiki in:*
 
 https://github.com/bitcoin-core/bitcoin-devwiki/wiki/
 
@@ -54,115 +54,8 @@ unsupported systems.
 Notable changes
 ===============
 
-P2P and network changes
------------------------
-
-- A bitcoind node will no longer rumour addresses to inbound peers by default.
-  They will become eligible for address gossip after sending an ADDR, ADDRV2,
-  or GETADDR message. (#21528)
-
-Fee estimation changes
-----------------------
-
-- Fee estimation now takes the feerate of replacement (RBF) transactions into
-  account. (#22539)
-
-Rescan startup parameter removed
---------------------------------
-
-The `-rescan` startup parameter has been removed. Wallets which require
-rescanning due to corruption will still be rescanned on startup.
-Otherwise, please use the `rescanblockchain` RPC to trigger a rescan. (#23123)
-
-Updated RPCs
+Example item
 ------------
-
-- The `-deprecatedrpc=addresses` configuration option has been removed.  RPCs
-  `gettxout`, `getrawtransaction`, `decoderawtransaction`, `decodescript`,
-  `gettransaction verbose=true` and REST endpoints `/rest/tx`, `/rest/getutxos`,
-  `/rest/block` no longer return the `addresses` and `reqSigs` fields, which
-  were previously deprecated in 22.0. (#22650)
-- The `getblock` RPC command now supports verbose level 3 containing transaction inputs
-  `prevout` information.  The existing `/rest/block/` REST endpoint is modified to contain
-  this information too. Every `vin` field will contain an additional `prevout` subfield
-  describing the spent output. `prevout` contains the following keys:
-  - `generated` - true if the spent coins was a coinbase.
-  - `height`
-  - `value`
-  - `scriptPubKey`
-
-- `listunspent` now includes `ancestorcount`, `ancestorsize`, and
-  `ancestorfees` for each transaction output that is still in the mempool.
-  (#12677)
-
-- `lockunspent` now optionally takes a third parameter, `persistent`, which
-  causes the lock to be written persistently to the wallet database. This
-  allows UTXOs to remain locked even after node restarts or crashes. (#23065)
-
-New RPCs
---------
-
-Build System
-------------
-
-Files
------
-
-* On startup, the list of banned hosts and networks (via `setban` RPC) in
-  `banlist.dat` is ignored and only `banlist.json` is considered. Bitcoin Core
-  version 22.x is the only version that can read `banlist.dat` and also write
-  it to `banlist.json`. If `banlist.json` already exists, version 22.x will not
-  try to translate the `banlist.dat` into json. After an upgrade, `listbanned`
-  can be used to double check the parsed entries. (#22570)
-
-New settings
-------------
-
-Updated settings
-----------------
-
-- In previous releases, the meaning of the command line option
-  `-persistmempool` (without a value provided) incorrectly disabled mempool
-  persistence.  `-persistmempool` is now treated like other boolean options to
-  mean `-persistmempool=1`. Passing `-persistmempool=0`, `-persistmempool=1`
-  and `-nopersistmempool` is unaffected. (#23061)
-
-- `-maxuploadtarget` now allows human readable byte units [k|K|m|M|g|G|t|T].
-  E.g. `-maxuploadtarget=500g`. No whitespace, +- or fractions allowed.
-  Default is `M` if no suffix provided. (#23249)
-
-Tools and Utilities
--------------------
-
-- Update `-getinfo` to return data in a user-friendly format that also reduces vertical space. (#21832)
-
-- CLI `-addrinfo` now returns a single field for the number of `onion` addresses
-  known to the node instead of separate `torv2` and `torv3` fields, as support
-  for Tor V2 addresses was removed from Bitcoin Core in 22.0. (#22544)
-
-Wallet
-------
-
-GUI changes
------------
-
-- UTXOs which are locked via the GUI are now stored persistently in the
-  wallet database, so are not lost on node shutdown or crash. (#23065)
-
-Low-level changes
-=================
-
-RPC
----
-
-- `getblockchaininfo` now returns a new `time` field, that provides the chain tip time. (#22407)
-
-Tests
------
-
-- For the `regtest` network the activation heights of several softforks were
-  set to block height 1. They can be changed by the runtime setting
-  `-testactivationheight=name@height`. (#22818)
 
 Credits
 =======

@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -48,6 +48,7 @@
 
 using interfaces::FoundBlock;
 
+namespace wallet {
 const std::map<uint64_t,std::string> WALLET_FLAG_CAVEATS{
     {WALLET_FLAG_AVOID_REUSE,
         "You need to rescan the blockchain in order to correctly mark used "
@@ -354,6 +355,38 @@ std::shared_ptr<CWallet> CreateWallet(WalletContext& context, const std::string&
     UpdateWalletSetting(*context.chain, name, load_on_start, warnings);
 
     status = DatabaseStatus::SUCCESS;
+    return wallet;
+}
+
+std::shared_ptr<CWallet> RestoreWallet(WalletContext& context, const fs::path& backup_file, const std::string& wallet_name, std::optional<bool> load_on_start, DatabaseStatus& status, bilingual_str& error, std::vector<bilingual_str>& warnings)
+{
+    DatabaseOptions options;
+    options.require_existing = true;
+
+    if (!fs::exists(backup_file)) {
+        error = Untranslated("Backup file does not exist");
+        status = DatabaseStatus::FAILED_INVALID_BACKUP_FILE;
+        return nullptr;
+    }
+
+    const fs::path wallet_path = fsbridge::AbsPathJoin(GetWalletDir(), fs::u8path(wallet_name));
+
+    if (fs::exists(wallet_path) || !TryCreateDirectories(wallet_path)) {
+        error = Untranslated(strprintf("Failed to create database path '%s'. Database already exists.", fs::PathToString(wallet_path)));
+        status = DatabaseStatus::FAILED_ALREADY_EXISTS;
+        return nullptr;
+    }
+
+    auto wallet_file = wallet_path / "wallet.dat";
+    fs::copy_file(backup_file, wallet_file, fs::copy_options::none);
+
+    auto wallet = LoadWallet(context, wallet_name, load_on_start, options, status, error, warnings);
+
+    if (!wallet) {
+        fs::remove(wallet_file);
+        fs::remove(wallet_path);
+    }
+
     return wallet;
 }
 
@@ -915,7 +948,7 @@ CWalletTx* CWallet::AddToWallet(CTransactionRef tx, const TxState& state, const 
     bool fInsertedNew = ret.second;
     bool fUpdated = update_wtx && update_wtx(wtx, fInsertedNew);
     if (fInsertedNew) {
-        wtx.nTimeReceived = chain().getAdjustedTime();
+        wtx.nTimeReceived = GetTime();
         wtx.nOrderPos = IncOrderPosNext(&batch);
         wtx.m_it_wtxOrdered = wtxOrdered.insert(std::make_pair(wtx.nOrderPos, &wtx));
         wtx.nTimeSmart = ComputeTimeSmart(wtx, rescanning_old_block);
@@ -994,7 +1027,8 @@ bool CWallet::LoadToWallet(const uint256& hash, const UpdateWalletTxFn& fill_wtx
     if (!fill_wtx(wtx, ins.second)) {
         return false;
     }
-    // If wallet doesn't have a chain (e.g wallet-tool), don't bother to update txn.
+    // If wallet doesn't have a chain (e.g when using bitcoin-wallet tool),
+    // don't bother to update txn.
     if (HaveChain()) {
         bool active;
         auto lookup_block = [&](const uint256& hash, int& height, TxState& state) {
@@ -1061,8 +1095,23 @@ bool CWallet::AddToWalletIfInvolvingMe(const CTransactionRef& ptx, const SyncTxS
 
             // loop though all outputs
             for (const CTxOut& txout: tx.vout) {
-                for (const auto& spk_man_pair : m_spk_managers) {
-                    spk_man_pair.second->MarkUnusedAddresses(txout.scriptPubKey);
+                for (const auto& spk_man : GetScriptPubKeyMans(txout.scriptPubKey)) {
+                    for (auto &dest : spk_man->MarkUnusedAddresses(txout.scriptPubKey)) {
+                        // If internal flag is not defined try to infer it from the ScriptPubKeyMan
+                        if (!dest.internal.has_value()) {
+                            dest.internal = IsInternalScriptPubKeyMan(spk_man);
+                        }
+
+                        // skip if can't determine whether it's a receiving address or not
+                        if (!dest.internal.has_value()) continue;
+
+                        // If this is a receiving address and it's not in the address book yet
+                        // (e.g. it wasn't generated on this node or we're restoring from backup)
+                        // add it to the address book for proper transaction accounting
+                        if (!*dest.internal && !FindAddressBookEntry(dest.dest, /* allow_change= */ false)) {
+                            SetAddressBook(dest.dest, "", "receive");
+                        }
+                    }
                 }
             }
 
@@ -1286,7 +1335,6 @@ void CWallet::updatedBlockTip()
     m_best_block_time = GetTime();
 }
 
-
 void CWallet::BlockUntilSyncedToCurrentChain() const {
     AssertLockNotHeld(cs_wallet);
     // Skip the queue-draining stuff if we know we're caught up with
@@ -1458,6 +1506,49 @@ bool DummySignInput(const SigningProvider& provider, CTxIn &tx_in, const CTxOut 
     return true;
 }
 
+bool FillInputToWeight(CTxIn& txin, int64_t target_weight)
+{
+    assert(txin.scriptSig.empty());
+    assert(txin.scriptWitness.IsNull());
+
+    int64_t txin_weight = GetTransactionInputWeight(txin);
+
+    // Do nothing if the weight that should be added is less than the weight that already exists
+    if (target_weight < txin_weight) {
+        return false;
+    }
+    if (target_weight == txin_weight) {
+        return true;
+    }
+
+    // Subtract current txin weight, which should include empty witness stack
+    int64_t add_weight = target_weight - txin_weight;
+    assert(add_weight > 0);
+
+    // We will want to subtract the size of the Compact Size UInt that will also be serialized.
+    // However doing so when the size is near a boundary can result in a problem where it is not
+    // possible to have a stack element size and combination to exactly equal a target.
+    // To avoid this possibility, if the weight to add is less than 10 bytes greater than
+    // a boundary, the size will be split so that 2/3rds will be in one stack element, and
+    // the remaining 1/3rd in another. Using 3rds allows us to avoid additional boundaries.
+    // 10 bytes is used because that accounts for the maximum size. This does not need to be super precise.
+    if ((add_weight >= 253 && add_weight < 263)
+        || (add_weight > std::numeric_limits<uint16_t>::max() && add_weight <= std::numeric_limits<uint16_t>::max() + 10)
+        || (add_weight > std::numeric_limits<uint32_t>::max() && add_weight <= std::numeric_limits<uint32_t>::max() + 10)) {
+        int64_t first_weight = add_weight / 3;
+        add_weight -= first_weight;
+
+        first_weight -= GetSizeOfCompactSize(first_weight);
+        txin.scriptWitness.stack.emplace(txin.scriptWitness.stack.end(), first_weight, 0);
+    }
+
+    add_weight -= GetSizeOfCompactSize(add_weight);
+    txin.scriptWitness.stack.emplace(txin.scriptWitness.stack.end(), add_weight, 0);
+    assert(GetTransactionInputWeight(txin) == target_weight);
+
+    return true;
+}
+
 // Helper for producing a bunch of max-sized low-S low-R signatures (eg 71 bytes)
 bool CWallet::DummySignTx(CMutableTransaction &txNew, const std::vector<CTxOut> &txouts, const CCoinControl* coin_control) const
 {
@@ -1466,6 +1557,14 @@ bool CWallet::DummySignTx(CMutableTransaction &txNew, const std::vector<CTxOut> 
     for (const auto& txout : txouts)
     {
         CTxIn& txin = txNew.vin[nIn];
+        // If weight was provided, fill the input to that weight
+        if (coin_control && coin_control->HasInputWeight(txin.prevout)) {
+            if (!FillInputToWeight(txin, coin_control->GetInputWeight(txin.prevout))) {
+                return false;
+            }
+            nIn++;
+            continue;
+        }
         // Use max sig if watch only inputs were used or if this particular input is an external input
         // to ensure a sufficient fee is attained for the requested feerate.
         const bool use_max_sig = coin_control && (coin_control->fAllowWatchOnly || coin_control->IsExternalSelected(txin.prevout));
@@ -1849,7 +1948,7 @@ bool CWallet::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint,
     return false;
 }
 
-TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& complete, int sighash_type, bool sign, bool bip32derivs, size_t * n_signed) const
+TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& complete, int sighash_type, bool sign, bool bip32derivs, size_t * n_signed, bool finalize) const
 {
     if (n_signed) {
         *n_signed = 0;
@@ -1881,7 +1980,7 @@ TransactionError CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& comp
     // Fill in information from ScriptPubKeyMans
     for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
         int n_signed_this_spkm = 0;
-        TransactionError res = spk_man->FillPSBT(psbtx, txdata, sighash_type, sign, bip32derivs, &n_signed_this_spkm);
+        TransactionError res = spk_man->FillPSBT(psbtx, txdata, sighash_type, sign, bip32derivs, &n_signed_this_spkm, finalize);
         if (res != TransactionError::OK) {
             return res;
         }
@@ -1919,29 +2018,58 @@ OutputType CWallet::TransactionChangeType(const std::optional<OutputType>& chang
         return *change_type;
     }
 
-    // if m_default_address_type is legacy, use legacy address as change (even
-    // if some of the outputs are P2WPKH or P2WSH).
+    // if m_default_address_type is legacy, use legacy address as change.
     if (m_default_address_type == OutputType::LEGACY) {
         return OutputType::LEGACY;
     }
 
-    // if any destination is P2WPKH or P2WSH, use P2WPKH for the change
-    // output.
+    bool any_tr{false};
+    bool any_wpkh{false};
+    bool any_sh{false};
+    bool any_pkh{false};
+
     for (const auto& recipient : vecSend) {
-        // Check if any destination contains a witness program:
-        int witnessversion = 0;
-        std::vector<unsigned char> witnessprogram;
-        if (recipient.scriptPubKey.IsWitnessProgram(witnessversion, witnessprogram)) {
-            if (GetScriptPubKeyMan(OutputType::BECH32M, true)) {
-                return OutputType::BECH32M;
-            } else if (GetScriptPubKeyMan(OutputType::BECH32, true)) {
-                return OutputType::BECH32;
-            } else {
-                return m_default_address_type;
-            }
+        std::vector<std::vector<uint8_t>> dummy;
+        const TxoutType type{Solver(recipient.scriptPubKey, dummy)};
+        if (type == TxoutType::WITNESS_V1_TAPROOT) {
+            any_tr = true;
+        } else if (type == TxoutType::WITNESS_V0_KEYHASH) {
+            any_wpkh = true;
+        } else if (type == TxoutType::SCRIPTHASH) {
+            any_sh = true;
+        } else if (type == TxoutType::PUBKEYHASH) {
+            any_pkh = true;
         }
     }
 
+    const bool has_bech32m_spkman(GetScriptPubKeyMan(OutputType::BECH32M, /*internal=*/true));
+    if (has_bech32m_spkman && any_tr) {
+        // Currently tr is the only type supported by the BECH32M spkman
+        return OutputType::BECH32M;
+    }
+    const bool has_bech32_spkman(GetScriptPubKeyMan(OutputType::BECH32, /*internal=*/true));
+    if (has_bech32_spkman && any_wpkh) {
+        // Currently wpkh is the only type supported by the BECH32 spkman
+        return OutputType::BECH32;
+    }
+    const bool has_p2sh_segwit_spkman(GetScriptPubKeyMan(OutputType::P2SH_SEGWIT, /*internal=*/true));
+    if (has_p2sh_segwit_spkman && any_sh) {
+        // Currently sh_wpkh is the only type supported by the P2SH_SEGWIT spkman
+        // As of 2021 about 80% of all SH are wrapping WPKH, so use that
+        return OutputType::P2SH_SEGWIT;
+    }
+    const bool has_legacy_spkman(GetScriptPubKeyMan(OutputType::LEGACY, /*internal=*/true));
+    if (has_legacy_spkman && any_pkh) {
+        // Currently pkh is the only type supported by the LEGACY spkman
+        return OutputType::LEGACY;
+    }
+
+    if (has_bech32m_spkman) {
+        return OutputType::BECH32M;
+    }
+    if (has_bech32_spkman) {
+        return OutputType::BECH32;
+    }
     // else use m_default_address_type for change
     return m_default_address_type;
 }
@@ -2253,16 +2381,15 @@ void ReserveDestination::ReturnDestination()
 bool CWallet::DisplayAddress(const CTxDestination& dest)
 {
     CScript scriptPubKey = GetScriptForDestination(dest);
-    const auto spk_man = GetScriptPubKeyMan(scriptPubKey);
-    if (spk_man == nullptr) {
-        return false;
+    for (const auto& spk_man : GetScriptPubKeyMans(scriptPubKey)) {
+        auto signer_spk_man = dynamic_cast<ExternalSignerScriptPubKeyMan *>(spk_man);
+        if (signer_spk_man == nullptr) {
+            continue;
+        }
+        ExternalSigner signer = ExternalSignerScriptPubKeyMan::GetExternalSigner();
+        return signer_spk_man->DisplayAddress(scriptPubKey, signer);
     }
-    auto signer_spk_man = dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man);
-    if (signer_spk_man == nullptr) {
-        return false;
-    }
-    ExternalSigner signer = ExternalSignerScriptPubKeyMan::GetExternalSigner();
-    return signer_spk_man->DisplayAddress(scriptPubKey, signer);
+    return false;
 }
 
 bool CWallet::LockCoin(const COutPoint& output, WalletBatch* batch)
@@ -2525,9 +2652,9 @@ std::unique_ptr<WalletDatabase> MakeWalletDatabase(const std::string& name, cons
     // 4. For backwards compatibility, the name of a data file in -walletdir.
     const fs::path wallet_path = fsbridge::AbsPathJoin(GetWalletDir(), fs::PathFromString(name));
     fs::file_type path_type = fs::symlink_status(wallet_path).type();
-    if (!(path_type == fs::file_not_found || path_type == fs::directory_file ||
-          (path_type == fs::symlink_file && fs::is_directory(wallet_path)) ||
-          (path_type == fs::regular_file && fs::PathFromString(name).filename() == fs::PathFromString(name)))) {
+    if (!(path_type == fs::file_type::not_found || path_type == fs::file_type::directory ||
+          (path_type == fs::file_type::symlink && fs::is_directory(wallet_path)) ||
+          (path_type == fs::file_type::regular && fs::PathFromString(name).filename() == fs::PathFromString(name)))) {
         error_string = Untranslated(strprintf(
               "Invalid -wallet path '%s'. -wallet path should point to a directory where wallet.dat and "
               "database/log.?????????? files can be stored, a location where such a directory could be created, "
@@ -2564,6 +2691,10 @@ std::shared_ptr<CWallet> CWallet::Create(WalletContext& context, const std::stri
         }
         else if (nLoadWalletRet == DBErrors::TOO_NEW) {
             error = strprintf(_("Error loading %s: Wallet requires newer version of %s"), walletFile, PACKAGE_NAME);
+            return nullptr;
+        }
+        else if (nLoadWalletRet == DBErrors::EXTERNAL_SIGNER_SUPPORT_REQUIRED) {
+            error = strprintf(_("Error loading %s: External signer wallet being loaded without external signer support compiled"), walletFile);
             return nullptr;
         }
         else if (nLoadWalletRet == DBErrors::NEED_REWRITE)
@@ -2763,8 +2894,6 @@ std::shared_ptr<CWallet> CWallet::Create(WalletContext& context, const std::stri
     // Try to top up keypool. No-op if the wallet is locked.
     walletInstance->TopUpKeyPool();
 
-    LOCK(walletInstance->cs_wallet);
-
     if (chain && !AttachChain(walletInstance, *chain, rescan_required, error, warnings)) {
         return nullptr;
     }
@@ -2776,9 +2905,9 @@ std::shared_ptr<CWallet> CWallet::Create(WalletContext& context, const std::stri
         }
     }
 
-    walletInstance->SetBroadcastTransactions(args.GetBoolArg("-walletbroadcast", DEFAULT_WALLETBROADCAST));
-
     {
+        LOCK(walletInstance->cs_wallet);
+        walletInstance->SetBroadcastTransactions(args.GetBoolArg("-walletbroadcast", DEFAULT_WALLETBROADCAST));
         walletInstance->WalletLogPrintf("setKeyPool.size() = %u\n",      walletInstance->GetKeyPoolSize());
         walletInstance->WalletLogPrintf("mapWallet.size() = %u\n",       walletInstance->mapWallet.size());
         walletInstance->WalletLogPrintf("m_address_book.size() = %u\n",  walletInstance->m_address_book.size());
@@ -3052,26 +3181,16 @@ ScriptPubKeyMan* CWallet::GetScriptPubKeyMan(const OutputType& type, bool intern
     return it->second;
 }
 
-std::set<ScriptPubKeyMan*> CWallet::GetScriptPubKeyMans(const CScript& script, SignatureData& sigdata) const
+std::set<ScriptPubKeyMan*> CWallet::GetScriptPubKeyMans(const CScript& script) const
 {
     std::set<ScriptPubKeyMan*> spk_mans;
+    SignatureData sigdata;
     for (const auto& spk_man_pair : m_spk_managers) {
         if (spk_man_pair.second->CanProvide(script, sigdata)) {
             spk_mans.insert(spk_man_pair.second.get());
         }
     }
     return spk_mans;
-}
-
-ScriptPubKeyMan* CWallet::GetScriptPubKeyMan(const CScript& script) const
-{
-    SignatureData sigdata;
-    for (const auto& spk_man_pair : m_spk_managers) {
-        if (spk_man_pair.second->CanProvide(script, sigdata)) {
-            return spk_man_pair.second.get();
-        }
-    }
-    return nullptr;
 }
 
 ScriptPubKeyMan* CWallet::GetScriptPubKeyMan(const uint256& id) const
@@ -3205,8 +3324,11 @@ void CWallet::SetupDescriptorScriptPubKeyMans()
             for (const UniValue& desc_val : descriptor_vals.get_array().getValues()) {
                 std::string desc_str = desc_val.getValStr();
                 FlatSigningProvider keys;
-                std::string dummy_error;
-                std::unique_ptr<Descriptor> desc = Parse(desc_str, keys, dummy_error, false);
+                std::string desc_error;
+                std::unique_ptr<Descriptor> desc = Parse(desc_str, keys, desc_error, false);
+                if (desc == nullptr) {
+                    throw std::runtime_error(std::string(__func__) + ": Invalid descriptor \"" + desc_str + "\" (" + desc_error + ")");
+                }
                 if (!desc->GetOutputType()) {
                     continue;
                 }
@@ -3289,6 +3411,30 @@ DescriptorScriptPubKeyMan* CWallet::GetDescriptorScriptPubKeyMan(const WalletDes
     return nullptr;
 }
 
+std::optional<bool> CWallet::IsInternalScriptPubKeyMan(ScriptPubKeyMan* spk_man) const
+{
+    // Legacy script pubkey man can't be either external or internal
+    if (IsLegacy()) {
+        return std::nullopt;
+    }
+
+    // only active ScriptPubKeyMan can be internal
+    if (!GetActiveScriptPubKeyMans().count(spk_man)) {
+        return std::nullopt;
+    }
+
+    const auto desc_spk_man = dynamic_cast<DescriptorScriptPubKeyMan*>(spk_man);
+    if (!desc_spk_man) {
+        throw std::runtime_error(std::string(__func__) + ": unexpected ScriptPubKeyMan type.");
+    }
+
+    LOCK(desc_spk_man->cs_desc_man);
+    const auto& type = desc_spk_man->GetWalletDescriptor().descriptor->GetOutputType();
+    assert(type.has_value());
+
+    return GetScriptPubKeyMan(*type, /* internal= */ true) == desc_spk_man;
+}
+
 ScriptPubKeyMan* CWallet::AddWalletDescriptor(WalletDescriptor& desc, const FlatSigningProvider& signing_provider, const std::string& label, bool internal)
 {
     AssertLockHeld(cs_wallet);
@@ -3342,3 +3488,4 @@ ScriptPubKeyMan* CWallet::AddWalletDescriptor(WalletDescriptor& desc, const Flat
 
     return spk_man;
 }
+} // namespace wallet

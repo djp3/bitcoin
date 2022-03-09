@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -194,7 +194,6 @@ public:
     enum Network GetNetwork() const;
     std::string ToString() const;
     std::string ToStringIP() const;
-    uint64_t GetHash() const;
     bool GetInAddr(struct in_addr* pipv4Addr) const;
     Network GetNetClass() const;
 
@@ -433,7 +432,7 @@ private:
 
         if (SetNetFromBIP155Network(bip155_net, address_size)) {
             m_addr.resize(address_size);
-            s >> MakeSpan(m_addr);
+            s >> Span{m_addr};
 
             if (m_net != NET_IPV6) {
                 return;
@@ -562,6 +561,14 @@ public:
 class CServiceHash
 {
 public:
+    CServiceHash()
+        : m_salt_k0{GetRand(std::numeric_limits<uint64_t>::max())},
+          m_salt_k1{GetRand(std::numeric_limits<uint64_t>::max())}
+    {
+    }
+
+    CServiceHash(uint64_t salt_k0, uint64_t salt_k1) : m_salt_k0{salt_k0}, m_salt_k1{salt_k1} {}
+
     size_t operator()(const CService& a) const noexcept
     {
         CSipHasher hasher(m_salt_k0, m_salt_k1);
@@ -572,8 +579,8 @@ public:
     }
 
 private:
-    const uint64_t m_salt_k0 = GetRand(std::numeric_limits<uint64_t>::max());
-    const uint64_t m_salt_k1 = GetRand(std::numeric_limits<uint64_t>::max());
+    const uint64_t m_salt_k0;
+    const uint64_t m_salt_k1;
 };
 
 #endif // BITCOIN_NETADDRESS_H

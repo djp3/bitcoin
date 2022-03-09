@@ -22,6 +22,7 @@ from .messages import (
     CTxIn,
     CTxInWitness,
     CTxOut,
+    SEQUENCE_FINAL,
     hash256,
     ser_uint256,
     tx_from_hex,
@@ -49,6 +50,8 @@ MAX_BLOCK_SIGOPS_WEIGHT = MAX_BLOCK_SIGOPS * WITNESS_SCALE_FACTOR
 
 # Genesis block time (regtest)
 TIME_GENESIS_BLOCK = 1296688602
+
+MAX_FUTURE_BLOCK_TIME = 2 * 60 * 60
 
 # Coinbase transaction outputs can only be spent after this number of new blocks (network rule)
 COINBASE_MATURITY = 100
@@ -126,7 +129,7 @@ def create_coinbase(height, pubkey=None, extra_output_script=None, fees=0, nValu
     If extra_output_script is given, make a 0-value output to that
     script. This is useful to pad block weight/sigops as needed. """
     coinbase = CTransaction()
-    coinbase.vin.append(CTxIn(COutPoint(0, 0xffffffff), script_BIP34_coinbase_height(height), 0xffffffff))
+    coinbase.vin.append(CTxIn(COutPoint(0, 0xffffffff), script_BIP34_coinbase_height(height), SEQUENCE_FINAL))
     coinbaseoutput = CTxOut()
     coinbaseoutput.nValue = nValue * COIN
     if nValue == 50:
@@ -154,7 +157,7 @@ def create_tx_with_script(prevtx, n, script_sig=b"", *, amount, script_pub_key=C
     """
     tx = CTransaction()
     assert n < len(prevtx.vout)
-    tx.vin.append(CTxIn(COutPoint(prevtx.sha256, n), script_sig, 0xffffffff))
+    tx.vin.append(CTxIn(COutPoint(prevtx.sha256, n), script_sig, SEQUENCE_FINAL))
     tx.vout.append(CTxOut(amount, script_pub_key))
     tx.calc_sha256()
     return tx

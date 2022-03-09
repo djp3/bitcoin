@@ -20,6 +20,7 @@ import urllib.parse
 import collections
 import shlex
 import sys
+from pathlib import Path
 
 from .authproxy import JSONRPCException
 from .descriptors import descsum_create
@@ -380,21 +381,31 @@ class TestNode():
     def wait_until_stopped(self, timeout=BITCOIND_PROC_WAIT_TIMEOUT):
         wait_until_helper(self.is_node_stopped, timeout=timeout, timeout_factor=self.timeout_factor)
 
+    @property
+    def chain_path(self) -> Path:
+        return Path(self.datadir) / self.chain
+
+    @property
+    def debug_log_path(self) -> Path:
+        return self.chain_path / 'debug.log'
+
+    def debug_log_bytes(self) -> int:
+        with open(self.debug_log_path, encoding='utf-8') as dl:
+            dl.seek(0, 2)
+            return dl.tell()
+
     @contextlib.contextmanager
     def assert_debug_log(self, expected_msgs, unexpected_msgs=None, timeout=2):
         if unexpected_msgs is None:
             unexpected_msgs = []
         time_end = time.time() + timeout * self.timeout_factor
-        debug_log = os.path.join(self.datadir, self.chain, 'debug.log')
-        with open(debug_log, encoding='utf-8') as dl:
-            dl.seek(0, 2)
-            prev_size = dl.tell()
+        prev_size = self.debug_log_bytes()
 
         yield
 
         while True:
             found = True
-            with open(debug_log, encoding='utf-8') as dl:
+            with open(self.debug_log_path, encoding='utf-8') as dl:
                 dl.seek(prev_size)
                 log = dl.read()
             print_log = " - " + "\n - ".join(log.splitlines())
@@ -410,6 +421,43 @@ class TestNode():
                 break
             time.sleep(0.05)
         self._raise_assertion_error('Expected messages "{}" does not partially match log:\n\n{}\n\n'.format(str(expected_msgs), print_log))
+
+    @contextlib.contextmanager
+    def wait_for_debug_log(self, expected_msgs, timeout=60, ignore_case=False):
+        """
+        Block until we see a particular debug log message fragment or until we exceed the timeout.
+        Return:
+            the number of log lines we encountered when matching
+        """
+        time_end = time.time() + timeout * self.timeout_factor
+        prev_size = self.debug_log_bytes()
+        re_flags = re.MULTILINE | (re.IGNORECASE if ignore_case else 0)
+
+        yield
+
+        while True:
+            found = True
+            with open(self.debug_log_path, encoding='utf-8') as dl:
+                dl.seek(prev_size)
+                log = dl.read()
+
+            for expected_msg in expected_msgs:
+                if re.search(re.escape(expected_msg), log, flags=re_flags) is None:
+                    found = False
+
+            if found:
+                return
+
+            if time.time() >= time_end:
+                print_log = " - " + "\n - ".join(log.splitlines())
+                break
+
+            # No sleep here because we want to detect the message fragment as fast as
+            # possible.
+
+        self._raise_assertion_error(
+            'Expected messages "{}" does not partially match log:\n\n{}\n\n'.format(
+                str(expected_msgs), print_log))
 
     @contextlib.contextmanager
     def profile_with_perf(self, profile_name: str):
@@ -570,7 +618,7 @@ class TestNode():
 
     def add_outbound_p2p_connection(self, p2p_conn, *, p2p_idx, connection_type="outbound-full-relay", **kwargs):
         """Add an outbound p2p connection from node. Must be an
-        "outbound-full-relay", "block-relay-only" or "addr-fetch" connection.
+        "outbound-full-relay", "block-relay-only", "addr-fetch" or "feeler" connection.
 
         This method adds the p2p connection to the self.p2ps list and returns
         the connection to the caller.
@@ -582,11 +630,16 @@ class TestNode():
 
         p2p_conn.peer_accept_connection(connect_cb=addconnection_callback, connect_id=p2p_idx + 1, net=self.chain, timeout_factor=self.timeout_factor, **kwargs)()
 
-        p2p_conn.wait_for_connect()
-        self.p2ps.append(p2p_conn)
+        if connection_type == "feeler":
+            # feeler connections are closed as soon as the node receives a `version` message
+            p2p_conn.wait_until(lambda: p2p_conn.message_count["version"] == 1, check_connected=False)
+            p2p_conn.wait_until(lambda: not p2p_conn.is_connected, check_connected=False)
+        else:
+            p2p_conn.wait_for_connect()
+            self.p2ps.append(p2p_conn)
 
-        p2p_conn.wait_for_verack()
-        p2p_conn.sync_with_ping()
+            p2p_conn.wait_for_verack()
+            p2p_conn.sync_with_ping()
 
         return p2p_conn
 
@@ -689,6 +742,9 @@ class RPCOverloadWrapper():
 
     def __getattr__(self, name):
         return getattr(self.rpc, name)
+
+    def createwallet_passthrough(self, *args, **kwargs):
+        return self.__getattr__("createwallet")(*args, **kwargs)
 
     def createwallet(self, wallet_name, disable_private_keys=None, blank=None, passphrase='', avoid_reuse=None, descriptors=None, load_on_startup=None, external_signer=None):
         if descriptors is None:

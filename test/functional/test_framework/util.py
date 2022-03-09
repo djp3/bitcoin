@@ -36,6 +36,7 @@ def assert_approx(v, vexp, vspan=0.00001):
 
 def assert_fee_amount(fee, tx_size, feerate_BTC_kvB):
     """Assert the fee is in range."""
+    assert isinstance(tx_size, int)
     target_fee = get_fee(tx_size, feerate_BTC_kvB)
     if fee < target_fee:
         raise AssertionError("Fee of %s BTC too low! (Should be %s BTC)" % (str(fee), str(target_fee)))
@@ -219,7 +220,13 @@ def str_to_b64str(string):
 
 
 def ceildiv(a, b):
-    """Divide 2 ints and round up to next int rather than round down"""
+    """
+    Divide 2 ints and round up to next int rather than round down
+    Implementation requires python integers, which have a // operator that does floor division.
+    Other types like decimal.Decimal whose // operator truncates towards 0 will not work.
+    """
+    assert isinstance(a, int)
+    assert isinstance(b, int)
     return -(-a // b)
 
 
@@ -227,7 +234,7 @@ def get_fee(tx_size, feerate_btc_kvb):
     """Calculate the fee in BTC given a feerate is BTC/kvB. Reflects CFeeRate::GetFee"""
     feerate_sat_kvb = int(feerate_btc_kvb * Decimal(1e8)) # Fee in sat/kvb as an int to avoid float precision errors
     target_fee_sat = ceildiv(feerate_sat_kvb * tx_size, 1000) # Round calculated fee up to nearest sat
-    return satoshi_round(target_fee_sat / Decimal(1e8)) # Truncate BTC result to nearest sat
+    return target_fee_sat / Decimal(1e8) # Return result in  BTC
 
 
 def satoshi_round(amount):
@@ -268,6 +275,7 @@ def wait_until_helper(predicate, *, attempts=float('inf'), timeout=float('inf'),
     elif time.time() >= time_end:
         raise AssertionError("Predicate {} not true after {} seconds".format(predicate_source, timeout))
     raise RuntimeError('Unreachable')
+
 
 def sha256sum_file(filename):
     h = hashlib.sha256()
@@ -378,10 +386,10 @@ def write_config(config_path, *, n, chain, extra_config="", disable_autoconnect=
         f.write("fixedseeds=0\n")
         f.write("listenonion=0\n")
         # Increase peertimeout to avoid disconnects while using mocktime.
-        # peertimeout is measured in wall clock time, so setting it to the
-        # duration of the longest test is sufficient. It can be overridden in
-        # tests.
-        f.write("peertimeout=999999\n")
+        # peertimeout is measured in mock time, so setting it large enough to
+        # cover any duration in mock time is sufficient. It can be overridden
+        # in tests.
+        f.write("peertimeout=999999999\n")
         f.write("printtoconsole=0\n")
         f.write("upnp=0\n")
         f.write("natpmp=0\n")
@@ -437,12 +445,18 @@ def delete_cookie_file(datadir, chain):
 
 def softfork_active(node, key):
     """Return whether a softfork is active."""
-    return node.getblockchaininfo()['softforks'][key]['active']
+    return node.getdeploymentinfo()['deployments'][key]['active']
 
 
 def set_node_times(nodes, t):
     for node in nodes:
         node.setmocktime(t)
+
+
+def check_node_connections(*, node, num_in, num_out):
+    info = node.getnetworkinfo()
+    assert_equal(info["connections_in"], num_in)
+    assert_equal(info["connections_out"], num_out)
 
 
 # Transaction/Block functions

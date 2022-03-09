@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2020 The Bitcoin Core developers
+// Copyright (c) 2015-2021 The Bitcoin Core developers
 // Copyright (c) 2017 The Zcash developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
@@ -382,9 +382,24 @@ void TorController::auth_cb(TorControlConnection& _conn, const TorControlReply& 
         // if -onion isn't set to something else.
         if (gArgs.GetArg("-onion", "") == "") {
             CService resolved(LookupNumeric("127.0.0.1", 9050));
-            proxyType addrOnion = proxyType(resolved, true);
+            Proxy addrOnion = Proxy(resolved, true);
             SetProxy(NET_ONION, addrOnion);
-            SetReachable(NET_ONION, true);
+
+            const auto onlynets = gArgs.GetArgs("-onlynet");
+
+            const bool onion_allowed_by_onlynet{
+                !gArgs.IsArgSet("-onlynet") ||
+                std::any_of(onlynets.begin(), onlynets.end(), [](const auto& n) {
+                    return ParseNetwork(n) == NET_ONION;
+                })};
+
+            if (onion_allowed_by_onlynet) {
+                // If NET_ONION is reachable, then the below is a noop.
+                //
+                // If NET_ONION is not reachable, then none of -proxy or -onion was given.
+                // Since we are here, then -torcontrol and -torpassword were given.
+                SetReachable(NET_ONION, true);
+            }
         }
 
         // Finally - now create the service

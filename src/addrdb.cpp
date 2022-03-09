@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -9,6 +9,7 @@
 #include <chainparams.h>
 #include <clientversion.h>
 #include <cstdint>
+#include <fs.h>
 #include <hash.h>
 #include <logging/timer.h>
 #include <netbase.h>
@@ -195,6 +196,15 @@ std::optional<bilingual_str> LoadAddrman(const std::vector<bool>& asmap, const A
         // Addrman can be in an inconsistent state after failure, reset it
         addrman = std::make_unique<AddrMan>(asmap, /* deterministic */ false, /* consistency_check_ratio */ check_addrman);
         LogPrintf("Creating peers.dat because the file was not found (%s)\n", fs::quoted(fs::PathToString(path_addr)));
+        DumpPeerAddresses(args, *addrman);
+    } catch (const InvalidAddrManVersionError&) {
+        if (!RenameOver(path_addr, (fs::path)path_addr + ".bak")) {
+            addrman = nullptr;
+            return strprintf(_("Failed to rename invalid peers.dat file. Please move or delete it and try again."));
+        }
+        // Addrman can be in an inconsistent state after failure, reset it
+        addrman = std::make_unique<AddrMan>(asmap, /* deterministic */ false, /* consistency_check_ratio */ check_addrman);
+        LogPrintf("Creating new peers.dat because the file version was not compatible (%s). Original backed up to peers.dat.bak\n", fs::quoted(fs::PathToString(path_addr)));
         DumpPeerAddresses(args, *addrman);
     } catch (const std::exception& e) {
         addrman = nullptr;

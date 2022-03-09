@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -36,7 +36,7 @@ std::optional<bilingual_str> CheckLegacyTxindex(CBlockTreeDB& block_tree_db)
 {
     CBlockLocator ignored{};
     if (block_tree_db.Read(DB_TXINDEX_BLOCK, ignored)) {
-        return _("The -txindex upgrade started by a previous version can not be completed. Restart with the previous version or run a full -reindex.");
+        return _("The -txindex upgrade started by a previous version cannot be completed. Restart with the previous version or run a full -reindex.");
     }
     bool txindex_legacy_flag{false};
     block_tree_db.ReadFlag("txindex", txindex_legacy_flag);
@@ -296,8 +296,8 @@ bool CBlockTreeDB::ReadFlag(const std::string &name, bool &fValue) {
 
 bool CBlockTreeDB::LoadBlockIndexGuts(const Consensus::Params& consensusParams, std::function<CBlockIndex*(const uint256&)> insertBlockIndex)
 {
+    AssertLockHeld(::cs_main);
     std::unique_ptr<CDBIterator> pcursor(NewIterator());
-
     pcursor->Seek(std::make_pair(DB_BLOCK_INDEX, uint256()));
 
     // Load m_block_index
@@ -322,8 +322,9 @@ bool CBlockTreeDB::LoadBlockIndexGuts(const Consensus::Params& consensusParams, 
                 pindexNew->nStatus        = diskindex.nStatus;
                 pindexNew->nTx            = diskindex.nTx;
 
-                if (!CheckProofOfWork(pindexNew->GetBlockHash(), pindexNew->nBits, consensusParams))
+                if (!CheckProofOfWork(pindexNew->GetBlockHash(), pindexNew->nBits, consensusParams)) {
                     return error("%s: CheckProofOfWork failed: %s", __func__, pindexNew->ToString());
+                }
 
                 pcursor->Next();
             } else {
