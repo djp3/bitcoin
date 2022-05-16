@@ -77,7 +77,6 @@ src/qt/bitcoin-qt.includes
 *.log
 *.trs
 *.dmg
-*.iso
 
 *.json.h
 *.raw.h
@@ -151,3 +150,5 @@ osx_volname
 dist/
 
 /guix-build-*
+
+/ci/scratch/

@@ -91,11 +91,6 @@ static constexpr bool IsSmallInteger(opcodetype opcode)
     return opcode >= OP_1 && opcode <= OP_16;
 }
 
-static constexpr bool IsPushdataOp(opcodetype opcode)
-{
-    return opcode > OP_FALSE && opcode <= OP_PUSHDATA4;
-}
-
 /** Retrieve a minimally-encoded number in range [min,max] from an (opcode, data) pair,
  *  whether it's OP_n or through a push. */
 static std::optional<int> GetScriptNumber(opcodetype opcode, valtype data, int min, int max)
@@ -398,13 +393,7 @@ void TaprootSpendData::Merge(TaprootSpendData other)
         merkle_root = other.merkle_root;
     }
     for (auto& [key, control_blocks] : other.scripts) {
-        // Once P0083R3 is supported by all our targeted platforms,
-        // this loop body can be replaced with:
-        // scripts[key].merge(std::move(control_blocks));
-        auto& target = scripts[key];
-        for (auto& control_block: control_blocks) {
-            target.insert(std::move(control_block));
-        }
+        scripts[key].merge(std::move(control_blocks));
     }
 }
 
