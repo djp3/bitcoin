@@ -858,7 +858,7 @@ public:
      * @brief Retrieves all benchmark results collected by the bench object so far.
      *
      * Each call to run() generates a Result that is stored within the Bench instance. This is mostly for advanced users who want to
-     * see all the nitty gritty detials.
+     * see all the nitty gritty details.
      *
      * @return All results collected so far.
      */
@@ -1905,7 +1905,7 @@ PerformanceCounters& performanceCounters() {
 // Windows version of doNotOptimizeAway
 // see https://github.com/google/benchmark/blob/master/include/benchmark/benchmark.h#L307
 // see https://github.com/facebook/folly/blob/master/folly/Benchmark.h#L280
-// see https://docs.microsoft.com/en-us/cpp/preprocessor/optimize
+// see https://learn.microsoft.com/en-us/cpp/preprocessor/optimize
 #    if defined(_MSC_VER)
 #        pragma optimize("", off)
 void doNotOptimizeAwaySink(void const*) {}

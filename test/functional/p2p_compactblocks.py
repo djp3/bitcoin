@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2016-2021 The Bitcoin Core developers
+# Copyright (c) 2016-2022 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test compact blocks (BIP 152)."""
@@ -146,10 +146,8 @@ class CompactBlocksTest(BitcoinTestFramework):
         ]]
         self.utxos = []
 
-    def build_block_on_tip(self, node, segwit=False):
+    def build_block_on_tip(self, node):
         block = create_block(tmpl=node.getblocktemplate(NORMAL_GBT_REQUEST_PARAMS))
-        if segwit:
-            add_witness_commitment(block)
         block.solve()
         return block
 
@@ -381,7 +379,7 @@ class CompactBlocksTest(BitcoinTestFramework):
         # Try announcing a block with an inv or header, expect a compactblock
         # request
         for announce in ["inv", "header"]:
-            block = self.build_block_on_tip(node, segwit=True)
+            block = self.build_block_on_tip(node)
 
             if announce == "inv":
                 test_node.send_message(msg_inv([CInv(MSG_BLOCK, block.sha256)]))
@@ -608,6 +606,36 @@ class CompactBlocksTest(BitcoinTestFramework):
             assert_equal(test_node.last_message["block"].block.sha256, int(block_hash, 16))
             assert "blocktxn" not in test_node.last_message
 
+        # Request with out-of-bounds tx index results in disconnect
+        bad_peer = self.nodes[0].add_p2p_connection(TestP2PConn())
+        block_hash = node.getblockhash(chain_height)
+        block = from_hex(CBlock(), node.getblock(block_hash, False))
+        msg.block_txn_request = BlockTransactionsRequest(int(block_hash, 16), [len(block.vtx)])
+        with node.assert_debug_log(['getblocktxn with out-of-bounds tx indices']):
+            bad_peer.send_message(msg)
+        bad_peer.wait_for_disconnect()
+
+    def test_low_work_compactblocks(self, test_node):
+        # A compactblock with insufficient work won't get its header included
+        node = self.nodes[0]
+        hashPrevBlock = int(node.getblockhash(node.getblockcount() - 150), 16)
+        block = self.build_block_on_tip(node)
+        block.hashPrevBlock = hashPrevBlock
+        block.solve()
+
+        comp_block = HeaderAndShortIDs()
+        comp_block.initialize_from_block(block)
+        with self.nodes[0].assert_debug_log(['[net] Ignoring low-work compact block from peer 0']):
+            test_node.send_and_ping(msg_cmpctblock(comp_block.to_p2p()))
+
+        tips = node.getchaintips()
+        found = False
+        for x in tips:
+            if x["hash"] == block.hash:
+                found = True
+                break
+        assert not found
+
     def test_compactblocks_not_at_tip(self, test_node):
         node = self.nodes[0]
         # Test that requesting old compactblocks doesn't work.
@@ -825,6 +853,9 @@ class CompactBlocksTest(BitcoinTestFramework):
 
         self.log.info("Testing compactblock requests/announcements not at chain tip...")
         self.test_compactblocks_not_at_tip(self.segwit_node)
+
+        self.log.info("Testing handling of low-work compact blocks...")
+        self.test_low_work_compactblocks(self.segwit_node)
 
         self.log.info("Testing handling of incorrect blocktxn responses...")
         self.test_incorrect_blocktxn_response(self.segwit_node)

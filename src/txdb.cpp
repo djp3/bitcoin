@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2021 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -207,11 +207,10 @@ public:
     // cache warmup on instantiation.
     CCoinsViewDBCursor(CDBIterator* pcursorIn, const uint256&hashBlockIn):
         CCoinsViewCursor(hashBlockIn), pcursor(pcursorIn) {}
-    ~CCoinsViewDBCursor() {}
+    ~CCoinsViewDBCursor() = default;
 
     bool GetKey(COutPoint &key) const override;
     bool GetValue(Coin &coin) const override;
-    unsigned int GetValueSize() const override;
 
     bool Valid() const override;
     void Next() override;
@@ -255,11 +254,6 @@ bool CCoinsViewDBCursor::GetKey(COutPoint &key) const
 bool CCoinsViewDBCursor::GetValue(Coin &coin) const
 {
     return pcursor->GetValue(coin);
-}
-
-unsigned int CCoinsViewDBCursor::GetValueSize() const
-{
-    return pcursor->GetValueSize();
 }
 
 bool CCoinsViewDBCursor::Valid() const
@@ -316,7 +310,7 @@ bool CBlockTreeDB::LoadBlockIndexGuts(const Consensus::Params& consensusParams, 
             CDiskBlockIndex diskindex;
             if (pcursor->GetValue(diskindex)) {
                 // Construct block index object
-                CBlockIndex* pindexNew = insertBlockIndex(diskindex.GetBlockHash());
+                CBlockIndex* pindexNew = insertBlockIndex(diskindex.ConstructBlockHash());
                 pindexNew->pprev          = insertBlockIndex(diskindex.hashPrev);
                 pindexNew->nHeight        = diskindex.nHeight;
                 pindexNew->nFile          = diskindex.nFile;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2015-2021 The Bitcoin Core developers
+# Copyright (c) 2015-2022 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test block processing."""
@@ -1297,7 +1297,7 @@ class FullBlockTest(BitcoinTestFramework):
         blocks2 = []
         for i in range(89, LARGE_REORG_SIZE + 89):
             blocks2.append(self.next_block("alt" + str(i)))
-        self.send_blocks(blocks2, False, force_send=True)
+        self.send_blocks(blocks2, False, force_send=False)
 
         # extend alt chain to trigger re-org
         block = self.next_block("alt" + str(chain1_tip + 1))

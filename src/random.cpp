@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2021 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -10,7 +10,7 @@
 #include <crypto/sha512.h>
 #include <support/cleanse.h>
 #ifdef WIN32
-#include <compat.h> // for Windows API
+#include <compat/compat.h>
 #include <wincrypt.h>
 #endif
 #include <logging.h>
@@ -21,7 +21,7 @@
 #include <util/time.h> // for GetTimeMicros()
 
 #include <cmath>
-#include <stdlib.h>
+#include <cstdlib>
 #include <thread>
 
 #ifndef WIN32
@@ -97,7 +97,7 @@ static void ReportHardwareRand()
     // This must be done in a separate function, as InitHardwareRand() may be indirectly called
     // from global constructors, before logging is initialized.
     if (g_rdseed_supported) {
-        LogPrintf("Using RdSeed as additional entropy source\n");
+        LogPrintf("Using RdSeed as an additional entropy source\n");
     }
     if (g_rdrand_supported) {
         LogPrintf("Using RdRand as an additional entropy source\n");
@@ -370,9 +370,7 @@ public:
         InitHardwareRand();
     }
 
-    ~RNGState()
-    {
-    }
+    ~RNGState() = default;
 
     void AddEvent(uint32_t event_info) noexcept EXCLUSIVE_LOCKS_REQUIRED(!m_events_mutex)
     {

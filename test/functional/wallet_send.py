@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2020-2021 The Bitcoin Core developers
+# Copyright (c) 2020-2022 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the send RPC command."""
@@ -25,6 +25,9 @@ from test_framework.util import (
 from test_framework.wallet_util import bytes_to_wif
 
 class WalletSendTest(BitcoinTestFramework):
+    def add_options(self, parser):
+        self.add_wallet_options(parser)
+
     def set_test_params(self):
         self.num_nodes = 2
         # whitelist all peers to speed up tx relay / mempool sync
@@ -276,11 +279,11 @@ class WalletSendTest(BitcoinTestFramework):
 
         self.log.info("Don't broadcast...")
         res = self.test_send(from_wallet=w0, to_wallet=w1, amount=1, add_to_wallet=False)
-        assert(res["hex"])
+        assert res["hex"]
 
         self.log.info("Return PSBT...")
         res = self.test_send(from_wallet=w0, to_wallet=w1, amount=1, psbt=True)
-        assert(res["psbt"])
+        assert res["psbt"]
 
         self.log.info("Create transaction that spends to address, but don't broadcast...")
         self.test_send(from_wallet=w0, to_wallet=w1, amount=1, add_to_wallet=False)
@@ -362,7 +365,7 @@ class WalletSendTest(BitcoinTestFramework):
         for mode in ["economical", "conservative"]:
             for k, v in {"string": "true", "bool": True, "object": {"foo": "bar"}}.items():
                 self.test_send(from_wallet=w0, to_wallet=w1, amount=1, conf_target=v, estimate_mode=mode,
-                    expect_error=(-3, f"Expected type number for conf_target, got {k}"))
+                    expect_error=(-3, f"JSON value of type {k} for field conf_target is not of expected type number"))
 
         # Test setting explicit fee rate just below the minimum of 1 sat/vB.
         self.log.info("Explicit fee rate raises RPC error 'fee rate too low' if fee_rate of 0.99999999 is passed")
@@ -409,10 +412,12 @@ class WalletSendTest(BitcoinTestFramework):
         assert res["complete"]
         utxo1 = w0.listunspent()[0]
         assert_equal(utxo1["amount"], 50)
+        ERR_NOT_ENOUGH_PRESET_INPUTS = "The preselected coins total amount does not cover the transaction target. " \
+                                       "Please allow other inputs to be automatically selected or include more coins manually"
         self.test_send(from_wallet=w0, to_wallet=w1, amount=51, inputs=[utxo1],
-                       expect_error=(-4, "Insufficient funds"))
+                       expect_error=(-4, ERR_NOT_ENOUGH_PRESET_INPUTS))
         self.test_send(from_wallet=w0, to_wallet=w1, amount=51, inputs=[utxo1], add_inputs=False,
-                       expect_error=(-4, "Insufficient funds"))
+                       expect_error=(-4, ERR_NOT_ENOUGH_PRESET_INPUTS))
         res = self.test_send(from_wallet=w0, to_wallet=w1, amount=51, inputs=[utxo1], add_inputs=True, add_to_wallet=False)
         assert res["complete"]
 
@@ -508,7 +513,7 @@ class WalletSendTest(BitcoinTestFramework):
         ext_utxo = ext_fund.listunspent(addresses=[addr])[0]
 
         # An external input without solving data should result in an error
-        self.test_send(from_wallet=ext_wallet, to_wallet=self.nodes[0], amount=15, inputs=[ext_utxo], add_inputs=True, psbt=True, include_watching=True, expect_error=(-4, "Insufficient funds"))
+        self.test_send(from_wallet=ext_wallet, to_wallet=self.nodes[0], amount=15, inputs=[ext_utxo], add_inputs=True, psbt=True, include_watching=True, expect_error=(-4, "Not solvable pre-selected input COutPoint(%s, %s)" % (ext_utxo["txid"][0:10], ext_utxo["vout"])))
 
         # But funding should work when the solving data is provided
         res = self.test_send(from_wallet=ext_wallet, to_wallet=self.nodes[0], amount=15, inputs=[ext_utxo], add_inputs=True, psbt=True, include_watching=True, solving_data={"pubkeys": [addr_info['pubkey']], "scripts": [addr_info["embedded"]["scriptPubKey"], addr_info["embedded"]["embedded"]["scriptPubKey"]]})

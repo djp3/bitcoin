@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Bitcoin Core developers
+// Copyright (c) 2021-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -304,6 +304,13 @@ public:
     // wrong copy.
     CWalletTx(CWalletTx const &) = delete;
     void operator=(CWalletTx const &x) = delete;
+};
+
+struct WalletTxOrderComparator {
+    bool operator()(const CWalletTx* a, const CWalletTx* b) const
+    {
+        return a->nOrderPos < b->nOrderPos;
+    }
 };
 } // namespace wallet
 

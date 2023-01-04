@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2015-2021 The Bitcoin Core developers
+# Copyright (c) 2015-2022 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test p2p permission message.
@@ -91,6 +91,7 @@ class P2PPermissionsTests(BitcoinTestFramework):
         self.nodes[1].assert_start_raises_init_error(["-whitelist=oopsie@127.0.0.1"], "Invalid P2P permission", match=ErrorMatch.PARTIAL_REGEX)
         self.nodes[1].assert_start_raises_init_error(["-whitelist=noban@127.0.0.1:230"], "Invalid netmask specified in", match=ErrorMatch.PARTIAL_REGEX)
         self.nodes[1].assert_start_raises_init_error(["-whitebind=noban@127.0.0.1/10"], "Cannot resolve -whitebind address", match=ErrorMatch.PARTIAL_REGEX)
+        self.nodes[1].assert_start_raises_init_error(["-whitebind=noban@127.0.0.1", "-bind=127.0.0.1", "-listen=0"], "Cannot set -bind or -whitebind together with -listen=0", match=ErrorMatch.PARTIAL_REGEX)
 
     def check_tx_relay(self):
         block_op_true = self.nodes[0].getblock(self.generatetoaddress(self.nodes[0], 100, ADDRESS_BCRT1_P2WSH_OP_TRUE)[0])
@@ -110,7 +111,8 @@ class P2PPermissionsTests(BitcoinTestFramework):
                     'vout': 0,
                 }], outputs=[{
                     ADDRESS_BCRT1_P2WSH_OP_TRUE: 5,
-                }]),
+                }],
+                replaceable=False),
         )
         tx.wit.vtxinwit = [CTxInWitness()]
         tx.wit.vtxinwit[0].scriptWitness.stack = [CScript([OP_TRUE])]

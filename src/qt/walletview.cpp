@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2021 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -19,7 +19,7 @@
 #include <qt/walletmodel.h>
 
 #include <interfaces/node.h>
-#include <node/ui_interface.h>
+#include <node/interface_ui.h>
 #include <util/strencodings.h>
 
 #include <QAction>
@@ -111,9 +111,7 @@ WalletView::WalletView(WalletModel* wallet_model, const PlatformStyle* _platform
     connect(walletModel, &WalletModel::showProgress, this, &WalletView::showProgress);
 }
 
-WalletView::~WalletView()
-{
-}
+WalletView::~WalletView() = default;
 
 void WalletView::setClientModel(ClientModel *_clientModel)
 {

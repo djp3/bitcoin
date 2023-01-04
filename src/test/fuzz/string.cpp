@@ -1,9 +1,10 @@
-// Copyright (c) 2020-2021 The Bitcoin Core developers
+// Copyright (c) 2020-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <blockfilter.h>
 #include <clientversion.h>
+#include <common/url.h>
 #include <logging.h>
 #include <netaddress.h>
 #include <netbase.h>
@@ -27,7 +28,6 @@
 #include <util/string.h>
 #include <util/system.h>
 #include <util/translation.h>
-#include <util/url.h>
 #include <version.h>
 
 #include <cstdint>

@@ -47,9 +47,26 @@ In a typical situation, this suffices:
 bitcoind -i2psam=127.0.0.1:7656
 ```
 
-The first time Bitcoin Core connects to the I2P router, its I2P address (and
-corresponding private key) will be automatically generated and saved in a file
-named `i2p_private_key` in the Bitcoin Core data directory.
+The first time Bitcoin Core connects to the I2P router, if
+`-i2pacceptincoming=1`, then it will automatically generate a persistent I2P
+address and its corresponding private key. The private key will be saved in a
+file named `i2p_private_key` in the Bitcoin Core data directory. The persistent
+I2P address is used for accepting incoming connections and for making outgoing
+connections if `-i2pacceptincoming=1`. If `-i2pacceptincoming=0` then only
+outbound I2P connections are made and a different transient I2P address is used
+for each connection to improve privacy.
+
+## Persistent vs transient I2P addresses
+
+In I2P connections, the connection receiver sees the I2P address of the
+connection initiator. This is unlike the Tor network where the recipient does
+not know who is connecting to them and can't tell if two connections are from
+the same peer or not.
+
+If an I2P node is not accepting incoming connections, then Bitcoin Core uses
+random, one-time, transient I2P addresses for itself for outbound connections
+to make it harder to discriminate, fingerprint or analyze it based on its I2P
+address.
 
 ## Additional configuration options related to I2P
 
@@ -85,7 +102,8 @@ one of the networks has issues.
 
 ## I2P-related information in Bitcoin Core
 
-There are several ways to see your I2P address in Bitcoin Core:
+There are several ways to see your I2P address in Bitcoin Core if accepting
+incoming I2P connections (`-i2pacceptincoming`):
 - in the "Local addresses" output of CLI `-netinfo`
 - in the "localaddresses" output of RPC `getnetworkinfo`
 - in the debug log (grep for `AddLocal`; the I2P address ends in `.b32.i2p`)
@@ -115,3 +133,29 @@ listening port to 0 when listening for incoming I2P connections and advertises
 its own I2P address with port 0. Furthermore, it will not attempt to connect to
 I2P addresses with a non-zero port number because with SAM v3.1 the destination
 port (`TO_PORT`) is always set to 0 and is not in the control of Bitcoin Core.
+
+## Bandwidth
+
+I2P routers may route a large amount of general network traffic with their
+default settings. Check your router's configuration to limit the amount of this
+traffic relayed, if desired.
+
+With `i2pd`, the amount of bandwidth being shared with the wider network can be
+adjusted with the `bandwidth`, `share` and `transittunnels` options in your
+`i2pd.conf` file. For example, to limit total I2P traffic to 256KB/s and share
+50% of this limit for a maximum of 20 transit tunnels:
+
+```
+bandwidth = 256
+share = 50
+
+[limits]
+transittunnels = 20
+```
+
+If you prefer not to relay any public I2P traffic and only permit I2P traffic
+from programs which are connecting via the SAM proxy, e.g. Bitcoin Core, you
+can set the `notransit` option to `true`.
+
+Similar bandwidth configuration options for the Java I2P router can be found in
+`http://127.0.0.1:7657/config` under the "Bandwidth" tab.

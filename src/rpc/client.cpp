@@ -1,5 +1,5 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2021 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -74,6 +74,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "listsinceblock", 1, "target_confirmations" },
     { "listsinceblock", 2, "include_watchonly" },
     { "listsinceblock", 3, "include_removed" },
+    { "listsinceblock", 4, "include_change" },
     { "sendmany", 1, "amounts" },
     { "sendmany", 2, "minconf" },
     { "sendmany", 4, "subtractfeefrom" },
@@ -82,6 +83,9 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "sendmany", 8, "fee_rate"},
     { "sendmany", 9, "verbose" },
     { "deriveaddresses", 1, "range" },
+    { "scanblocks", 1, "scanobjects" },
+    { "scanblocks", 2, "start_height" },
+    { "scanblocks", 3, "stop_height" },
     { "scantxoutset", 1, "scanobjects" },
     { "addmultisigaddress", 0, "nrequired" },
     { "addmultisigaddress", 1, "keys" },
@@ -98,6 +102,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "getchaintxstats", 0, "nblocks" },
     { "gettransaction", 1, "include_watchonly" },
     { "gettransaction", 2, "verbose" },
+    { "getrawtransaction", 1, "verbosity" },
     { "getrawtransaction", 1, "verbose" },
     { "createrawtransaction", 0, "inputs" },
     { "createrawtransaction", 1, "outputs" },
@@ -110,6 +115,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "sendrawtransaction", 1, "maxfeerate" },
     { "testmempoolaccept", 0, "rawtxs" },
     { "testmempoolaccept", 1, "maxfeerate" },
+    { "submitpackage", 0, "package" },
     { "combinerawtransaction", 0, "txs" },
     { "fundrawtransaction", 1, "options" },
     { "fundrawtransaction", 2, "iswitness" },
@@ -146,6 +152,8 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "sendall", 1, "conf_target" },
     { "sendall", 3, "fee_rate"},
     { "sendall", 4, "options" },
+    { "simulaterawtransaction", 0, "rawtxs" },
+    { "simulaterawtransaction", 1, "options" },
     { "importprivkey", 2, "rescan" },
     { "importaddress", 2, "rescan" },
     { "importaddress", 3, "p2sh" },
@@ -173,6 +181,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "setwalletflag", 1, "value" },
     { "getmempoolancestors", 1, "verbose" },
     { "getmempooldescendants", 1, "verbose" },
+    { "gettxspendingprevout", 0, "outputs" },
     { "bumpfee", 1, "options" },
     { "psbtbumpfee", 1, "options" },
     { "logging", 0, "include" },
@@ -269,16 +278,21 @@ UniValue RPCConvertValues(const std::string &strMethod, const std::vector<std::s
 UniValue RPCConvertNamedValues(const std::string &strMethod, const std::vector<std::string> &strParams)
 {
     UniValue params(UniValue::VOBJ);
+    UniValue positional_args{UniValue::VARR};
 
     for (const std::string &s: strParams) {
         size_t pos = s.find('=');
         if (pos == std::string::npos) {
-            throw(std::runtime_error("No '=' in named argument '"+s+"', this needs to be present for every argument (even if it is empty)"));
+            positional_args.push_back(rpcCvtTable.convert(strMethod, positional_args.size()) ? ParseNonRFCJSONValue(s) : s);
+            continue;
         }
 
         std::string name = s.substr(0, pos);
         std::string value = s.substr(pos+1);
 
+        // Intentionally overwrite earlier named values with later ones as a
+        // convenience for scripts and command line users that want to merge
+        // options.
         if (!rpcCvtTable.convert(strMethod, name)) {
             // insert string value directly
             params.pushKV(name, value);
@@ -286,6 +300,13 @@ UniValue RPCConvertNamedValues(const std::string &strMethod, const std::vector<s
             // parse string as JSON, insert bool/number/object/etc. value
             params.pushKV(name, ParseNonRFCJSONValue(value));
         }
+    }
+
+    if (!positional_args.empty()) {
+        // Use __pushKV instead of pushKV to avoid overwriting an explicit
+        // "args" value with an implicit one. Let the RPC server handle the
+        // request as given.
+        params.__pushKV("args", positional_args);
     }
 
     return params;

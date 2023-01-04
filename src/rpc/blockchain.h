@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 The Bitcoin Core developers
+// Copyright (c) 2017-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -20,7 +20,7 @@ extern RecursiveMutex cs_main;
 
 class CBlock;
 class CBlockIndex;
-class CChainState;
+class Chainstate;
 class UniValue;
 namespace node {
 struct NodeContext;
@@ -54,8 +54,8 @@ void CalculatePercentilesByWeight(CAmount result[NUM_GETBLOCKSTATS_PERCENTILES],
  */
 UniValue CreateUTXOSnapshot(
     node::NodeContext& node,
-    CChainState& chainstate,
-    CAutoFile& afile,
+    Chainstate& chainstate,
+    AutoFile& afile,
     const fs::path& path,
     const fs::path& tmppath);
 

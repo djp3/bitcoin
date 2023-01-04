@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2021 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -28,10 +28,7 @@ PeerTableModel::PeerTableModel(interfaces::Node& node, QObject* parent) :
     refresh();
 }
 
-PeerTableModel::~PeerTableModel()
-{
-    // Intentionally left empty
-}
+PeerTableModel::~PeerTableModel() = default;
 
 void PeerTableModel::startAutoRefresh()
 {

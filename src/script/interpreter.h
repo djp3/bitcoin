@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2021 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -233,9 +233,9 @@ static constexpr size_t TAPROOT_CONTROL_NODE_SIZE = 32;
 static constexpr size_t TAPROOT_CONTROL_MAX_NODE_COUNT = 128;
 static constexpr size_t TAPROOT_CONTROL_MAX_SIZE = TAPROOT_CONTROL_BASE_SIZE + TAPROOT_CONTROL_NODE_SIZE * TAPROOT_CONTROL_MAX_NODE_COUNT;
 
-extern const CHashWriter HASHER_TAPSIGHASH; //!< Hasher with tag "TapSighash" pre-fed to it.
-extern const CHashWriter HASHER_TAPLEAF;    //!< Hasher with tag "TapLeaf" pre-fed to it.
-extern const CHashWriter HASHER_TAPBRANCH;  //!< Hasher with tag "TapBranch" pre-fed to it.
+extern const HashWriter HASHER_TAPSIGHASH; //!< Hasher with tag "TapSighash" pre-fed to it.
+extern const HashWriter HASHER_TAPLEAF;    //!< Hasher with tag "TapLeaf" pre-fed to it.
+extern const HashWriter HASHER_TAPBRANCH;  //!< Hasher with tag "TapBranch" pre-fed to it.
 
 template <class T>
 uint256 SignatureHash(const CScript& scriptCode, const T& txTo, unsigned int nIn, int nHashType, const CAmount& amount, SigVersion sigversion, const PrecomputedTransactionData* cache = nullptr);
@@ -307,10 +307,10 @@ using MutableTransactionSignatureChecker = GenericTransactionSignatureChecker<CM
 class DeferringSignatureChecker : public BaseSignatureChecker
 {
 protected:
-    BaseSignatureChecker& m_checker;
+    const BaseSignatureChecker& m_checker;
 
 public:
-    DeferringSignatureChecker(BaseSignatureChecker& checker) : m_checker(checker) {}
+    DeferringSignatureChecker(const BaseSignatureChecker& checker) : m_checker(checker) {}
 
     bool CheckECDSASignature(const std::vector<unsigned char>& scriptSig, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const override
     {

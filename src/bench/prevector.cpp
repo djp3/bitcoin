@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2021 The Bitcoin Core developers
+// Copyright (c) 2015-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -10,8 +10,8 @@
 #include <bench/bench.h>
 
 struct nontrivial_t {
-    int x;
-    nontrivial_t() :x(-1) {}
+    int x{-1};
+    nontrivial_t() = default;
     SERIALIZE_METHODS(nontrivial_t, obj) { READWRITE(obj.x); }
 };
 static_assert(!std::is_trivially_default_constructible<nontrivial_t>::value,
@@ -85,12 +85,12 @@ static void PrevectorDeserialize(benchmark::Bench& bench)
     {                                                                \
         Prevector##name<nontrivial_t>(bench);                        \
     }                                                                \
-    BENCHMARK(Prevector##name##Nontrivial);                          \
+    BENCHMARK(Prevector##name##Nontrivial, benchmark::PriorityLevel::HIGH);         \
     static void Prevector##name##Trivial(benchmark::Bench& bench)    \
     {                                                                \
         Prevector##name<trivial_t>(bench);                           \
     }                                                                \
-    BENCHMARK(Prevector##name##Trivial);
+    BENCHMARK(Prevector##name##Trivial, benchmark::PriorityLevel::HIGH);
 
 PREVECTOR_TEST(Clear)
 PREVECTOR_TEST(Destructor)

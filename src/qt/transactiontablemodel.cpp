@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2021 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -62,7 +62,7 @@ struct TxLessThan
 struct TransactionNotification
 {
 public:
-    TransactionNotification() {}
+    TransactionNotification() = default;
     TransactionNotification(uint256 _hash, ChangeType _status, bool _showTransaction):
         hash(_hash), status(_status), showTransaction(_showTransaction) {}
 

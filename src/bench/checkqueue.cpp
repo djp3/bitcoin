@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2020 The Bitcoin Core developers
+// Copyright (c) 2015-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -30,8 +30,7 @@ static void CCheckQueueSpeedPrevectorJob(benchmark::Bench& bench)
 
     struct PrevectorJob {
         prevector<PREVECTOR_SIZE, uint8_t> p;
-        PrevectorJob(){
-        }
+        PrevectorJob() = default;
         explicit PrevectorJob(FastRandomContext& insecure_rand){
             p.resize(insecure_rand.randrange(PREVECTOR_SIZE*2));
         }
@@ -71,4 +70,4 @@ static void CCheckQueueSpeedPrevectorJob(benchmark::Bench& bench)
     queue.StopWorkerThreads();
     ECC_Stop();
 }
-BENCHMARK(CCheckQueueSpeedPrevectorJob);
+BENCHMARK(CCheckQueueSpeedPrevectorJob, benchmark::PriorityLevel::HIGH);

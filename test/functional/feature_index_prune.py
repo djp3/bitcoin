@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2020-2021 The Bitcoin Core developers
+# Copyright (c) 2020-2022 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test indices in conjunction with prune."""
@@ -62,7 +62,7 @@ class FeatureIndexPruneTest(BitcoinTestFramework):
         for node in filter_nodes:
             assert_greater_than(len(node.getblockfilter(tip)['filter']), 0)
         for node in stats_nodes:
-            assert(node.gettxoutsetinfo(hash_type="muhash", hash_or_height=tip)['muhash'])
+            assert node.gettxoutsetinfo(hash_type="muhash", hash_or_height=tip)['muhash']
 
         self.mine_batches(500)
         self.sync_index(height=700)
@@ -73,21 +73,21 @@ class FeatureIndexPruneTest(BitcoinTestFramework):
                 pruneheight_new = node.pruneblockchain(400)
                 # the prune heights used here and below are magic numbers that are determined by the
                 # thresholds at which block files wrap, so they depend on disk serialization and default block file size.
-                assert_equal(pruneheight_new, 249)
+                assert_equal(pruneheight_new, 248)
 
         self.log.info("check if we can access the tips blockfilter and coinstats when we have pruned some blocks")
         tip = self.nodes[0].getbestblockhash()
         for node in filter_nodes:
             assert_greater_than(len(node.getblockfilter(tip)['filter']), 0)
         for node in stats_nodes:
-            assert(node.gettxoutsetinfo(hash_type="muhash", hash_or_height=tip)['muhash'])
+            assert node.gettxoutsetinfo(hash_type="muhash", hash_or_height=tip)['muhash']
 
         self.log.info("check if we can access the blockfilter and coinstats of a pruned block")
         height_hash = self.nodes[0].getblockhash(2)
         for node in filter_nodes:
             assert_greater_than(len(node.getblockfilter(height_hash)['filter']), 0)
         for node in stats_nodes:
-            assert(node.gettxoutsetinfo(hash_type="muhash", hash_or_height=height_hash)['muhash'])
+            assert node.gettxoutsetinfo(hash_type="muhash", hash_or_height=height_hash)['muhash']
 
         # mine and sync index up to a height that will later be the pruneheight
         self.generate(self.nodes[0], 51)
@@ -108,7 +108,7 @@ class FeatureIndexPruneTest(BitcoinTestFramework):
         self.log.info("prune exactly up to the indices best blocks while the indices are disabled")
         for i in range(3):
             pruneheight_2 = self.nodes[i].pruneblockchain(1000)
-            assert_equal(pruneheight_2, 751)
+            assert_equal(pruneheight_2, 750)
             # Restart the nodes again with the indices activated
             self.restart_node(i, extra_args=self.extra_args[i])
 
@@ -138,11 +138,12 @@ class FeatureIndexPruneTest(BitcoinTestFramework):
             self.connect_nodes(i, 3)
 
         self.sync_blocks(timeout=300)
+        self.sync_index(height=2500)
 
         for node in self.nodes[:2]:
             with node.assert_debug_log(['limited pruning to height 2489']):
                 pruneheight_new = node.pruneblockchain(2500)
-                assert_equal(pruneheight_new, 2006)
+                assert_equal(pruneheight_new, 2005)
 
         self.log.info("ensure that prune locks don't prevent indices from failing in a reorg scenario")
         with self.nodes[0].assert_debug_log(['basic block filter index prune lock moved back to 2480']):

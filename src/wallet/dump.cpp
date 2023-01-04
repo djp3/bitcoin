@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021 The Bitcoin Core developers
+// Copyright (c) 2020-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -41,7 +41,7 @@ bool DumpWallet(const ArgsManager& args, CWallet& wallet, bilingual_str& error)
         return false;
     }
 
-    CHashWriter hasher(0, 0);
+    HashWriter hasher{};
 
     WalletDatabase& db = wallet.GetDatabase();
     std::unique_ptr<DatabaseBatch> batch = db.MakeBatch();
@@ -132,7 +132,7 @@ bool CreateFromDump(const ArgsManager& args, const std::string& name, const fs::
     std::ifstream dump_file{dump_path};
 
     // Compute the checksum
-    CHashWriter hasher(0, 0);
+    HashWriter hasher{};
     uint256 checksum;
 
     // Check the magic and version
@@ -201,7 +201,7 @@ bool CreateFromDump(const ArgsManager& args, const std::string& name, const fs::
 
     // dummy chain interface
     bool ret = true;
-    std::shared_ptr<CWallet> wallet(new CWallet(nullptr /* chain */, name, gArgs, std::move(database)), WalletToolReleaseWallet);
+    std::shared_ptr<CWallet> wallet(new CWallet(/*chain=*/nullptr, name, gArgs, std::move(database)), WalletToolReleaseWallet);
     {
         LOCK(wallet->cs_wallet);
         DBErrors load_wallet_ret = wallet->LoadWallet();

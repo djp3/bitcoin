@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Bitcoin Core developers
+// Copyright (c) 2021-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -128,6 +128,7 @@ const std::vector<std::string> RPC_COMMANDS_SAFE_FOR_FUZZING{
     "getmempoolancestors",
     "getmempooldescendants",
     "getmempoolentry",
+    "gettxspendingprevout",
     "getmempoolinfo",
     "getmininginfo",
     "getnettotals",
@@ -150,6 +151,7 @@ const std::vector<std::string> RPC_COMMANDS_SAFE_FOR_FUZZING{
     "preciousblock",
     "pruneblockchain",
     "reconsiderblock",
+    "scanblocks",
     "scantxoutset",
     "sendrawtransaction",
     "setmocktime",
@@ -158,6 +160,7 @@ const std::vector<std::string> RPC_COMMANDS_SAFE_FOR_FUZZING{
     "signrawtransactionwithkey",
     "submitblock",
     "submitheader",
+    "submitpackage",
     "syncwithvalidationinterfacequeue",
     "testmempoolaccept",
     "uptime",

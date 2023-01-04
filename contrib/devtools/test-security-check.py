@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2015-2021 The Bitcoin Core developers
+# Copyright (c) 2015-2022 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 '''
@@ -39,7 +39,7 @@ def call_security_check(cc, source, executable, options):
         env_flags += filter(None, os.environ.get(var, '').split(' '))
 
     subprocess.run([*cc,source,'-o',executable] + env_flags + options, check=True)
-    p = subprocess.run(['./contrib/devtools/security-check.py',executable], stdout=subprocess.PIPE, universal_newlines=True)
+    p = subprocess.run([os.path.join(os.path.dirname(__file__), 'security-check.py'), executable], stdout=subprocess.PIPE, universal_newlines=True)
     return (p.returncode, p.stdout.rstrip())
 
 def get_arch(cc, source, executable):
