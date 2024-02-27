@@ -260,8 +260,8 @@ CTxMemPool::setEntries CTxMemPool::AssumeCalculateMemPoolAncestors(
     const Limits& limits,
     bool fSearchForParents /* = true */) const
 {
-    auto result{Assume(CalculateMemPoolAncestors(entry, limits, fSearchForParents))};
-    if (!result) {
+    auto result{CalculateMemPoolAncestors(entry, limits, fSearchForParents)};
+    if (!Assume(result)) {
         LogPrintLevel(BCLog::MEMPOOL, BCLog::Level::Error, "%s: CalculateMemPoolAncestors failed unexpectedly, continuing with empty ancestor set (%s)\n",
                       calling_fn_name, util::ErrorString(result).original);
     }
@@ -1128,7 +1128,7 @@ void CTxMemPool::SetLoadTried(bool load_tried)
 }
 
 
-const std::string RemovalReasonToString(const MemPoolRemovalReason& r) noexcept
+std::string RemovalReasonToString(const MemPoolRemovalReason& r) noexcept
 {
     switch (r) {
         case MemPoolRemovalReason::EXPIRY: return "expiry";
