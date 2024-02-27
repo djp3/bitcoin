@@ -2,10 +2,6 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#if defined(HAVE_CONFIG_H)
-#include <config/bitcoin-config.h>
-#endif
-
 #include <qt/askpassphrasedialog.h>
 #include <qt/forms/ui_askpassphrasedialog.h>
 
@@ -89,11 +85,10 @@ void AskPassphraseDialog::accept()
     oldpass.reserve(MAX_PASSPHRASE_SIZE);
     newpass1.reserve(MAX_PASSPHRASE_SIZE);
     newpass2.reserve(MAX_PASSPHRASE_SIZE);
-    // TODO: get rid of this .c_str() by implementing SecureString::operator=(std::string)
-    // Alternately, find a way to make this input mlock()'d to begin with.
-    oldpass.assign(ui->passEdit1->text().toStdString().c_str());
-    newpass1.assign(ui->passEdit2->text().toStdString().c_str());
-    newpass2.assign(ui->passEdit3->text().toStdString().c_str());
+
+    oldpass.assign(std::string_view{ui->passEdit1->text().toStdString()});
+    newpass1.assign(std::string_view{ui->passEdit2->text().toStdString()});
+    newpass2.assign(std::string_view{ui->passEdit3->text().toStdString()});
 
     secureClearPassFields();
 
@@ -154,9 +149,23 @@ void AskPassphraseDialog::accept()
     case Unlock:
         try {
             if (!model->setWalletLocked(false, oldpass)) {
-                QMessageBox::critical(this, tr("Wallet unlock failed"),
-                                      tr("The passphrase entered for the wallet decryption was incorrect."));
+                // Check if the passphrase has a null character (see #27067 for details)
+                if (oldpass.find('\0') == std::string::npos) {
+                    QMessageBox::critical(this, tr("Wallet unlock failed"),
+                                          tr("The passphrase entered for the wallet decryption was incorrect."));
+                } else {
+                    QMessageBox::critical(this, tr("Wallet unlock failed"),
+                                          tr("The passphrase entered for the wallet decryption is incorrect. "
+                                             "It contains a null character (ie - a zero byte). "
+                                             "If the passphrase was set with a version of this software prior to 25.0, "
+                                             "please try again with only the characters up to — but not including — "
+                                             "the first null character. If this is successful, please set a new "
+                                             "passphrase to avoid this issue in the future."));
+                }
             } else {
+                if (m_passphrase_out) {
+                    m_passphrase_out->assign(oldpass);
+                }
                 QDialog::accept(); // Success
             }
         } catch (const std::runtime_error& e) {
@@ -174,8 +183,18 @@ void AskPassphraseDialog::accept()
             }
             else
             {
-                QMessageBox::critical(this, tr("Wallet encryption failed"),
-                                     tr("The passphrase entered for the wallet decryption was incorrect."));
+                // Check if the old passphrase had a null character (see #27067 for details)
+                if (oldpass.find('\0') == std::string::npos) {
+                    QMessageBox::critical(this, tr("Passphrase change failed"),
+                                          tr("The passphrase entered for the wallet decryption was incorrect."));
+                } else {
+                    QMessageBox::critical(this, tr("Passphrase change failed"),
+                                          tr("The old passphrase entered for the wallet decryption is incorrect. "
+                                             "It contains a null character (ie - a zero byte). "
+                                             "If the passphrase was set with a version of this software prior to 25.0, "
+                                             "please try again with only the characters up to — but not including — "
+                                             "the first null character."));
+                }
             }
         }
         else

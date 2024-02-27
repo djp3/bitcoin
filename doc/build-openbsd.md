@@ -1,6 +1,6 @@
 # OpenBSD Build Guide
 
-**Updated for OpenBSD [7.1](https://www.openbsd.org/71.html)**
+**Updated for OpenBSD [7.4](https://www.openbsd.org/74.html)**
 
 This guide describes how to build bitcoind, command-line utilities, and GUI on OpenBSD.
 
@@ -43,6 +43,8 @@ BerkeleyDB is only required to support legacy wallets.
 It is recommended to use Berkeley DB 4.8. You cannot use the BerkeleyDB library
 from ports. However you can build it yourself, [using depends](/depends).
 
+Refer to [depends/README.md](/depends/README.md) for detailed instructions.
+
 ```bash
 gmake -C depends NO_BOOST=1 NO_LIBEVENT=1 NO_QT=1 NO_SQLITE=1 NO_NATPMP=1 NO_UPNP=1 NO_ZMQ=1 NO_USDT=1
 ...
@@ -79,10 +81,6 @@ export AUTOMAKE_VERSION=1.16
 ```
 
 ### 1. Configuration
-
-Note that external signer support is currently not available on OpenBSD, since
-the used header-only library Boost.Process fails to compile (certain system
-calls and preprocessor defines like `waitid()` and `WEXITED` are missing).
 
 There are many ways to configure Bitcoin Core, here are a few common examples:
 
