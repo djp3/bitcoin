@@ -21,6 +21,7 @@
 #include <util/epochguard.h>
 #include <util/hasher.h>
 #include <util/result.h>
+#include <util/feefrac.h>
 
 #include <boost/multi_index/hashed_index.hpp>
 #include <boost/multi_index/identity.hpp>
@@ -40,6 +41,7 @@
 #include <vector>
 
 class CChain;
+class ValidationSignals;
 
 /** Fake height value used in Coin to signify they are only in the memory pool (since 0.8) */
 static const uint32_t MEMPOOL_HEIGHT = 0x7FFFFFFF;
@@ -447,6 +449,8 @@ public:
 
     const Limits m_limits;
 
+    ValidationSignals* const m_signals;
+
     /** Create a new CTxMemPool.
      * Sanity checks will be off by default for performance, because otherwise
      * accepting transactions becomes O(N^2) where N is the number of transactions
@@ -732,6 +736,28 @@ public:
     uint64_t GetSequence() const EXCLUSIVE_LOCKS_REQUIRED(cs) {
         return m_sequence_number;
     }
+
+    /**
+     * Calculate the old and new mempool feerate diagrams relating to the
+     * clusters that would be affected by a potential replacement transaction.
+     * (replacement_fees, replacement_vsize) values are gathered from a
+     * proposed set of replacement transactions that are considered as a single
+     * chunk, and represent their complete cluster. In other words, they have no
+     * in-mempool ancestors.
+     *
+     * @param[in] replacement_fees    Package fees
+     * @param[in] replacement_vsize   Package size (must be greater than 0)
+     * @param[in] direct_conflicts    All transactions that would be removed directly by
+     *                                having a conflicting input with a proposed transaction
+     * @param[in] all_conflicts       All transactions that would be removed
+     * @return old and new diagram pair respectively, or an error string if the conflicts don't match a calculable topology
+     */
+    util::Result<std::pair<std::vector<FeeFrac>, std::vector<FeeFrac>>> CalculateFeerateDiagramsForRBF(CAmount replacement_fees, int64_t replacement_vsize, const setEntries& direct_conflicts, const setEntries& all_conflicts) EXCLUSIVE_LOCKS_REQUIRED(cs);
+
+    /* Check that all direct conflicts are in a cluster size of two or less. Each
+     * direct conflict may be in a separate cluster.
+     */
+    std::optional<std::string> CheckConflictTopology(const setEntries& direct_conflicts);
 
 private:
     /** UpdateForDescendants is used by UpdateTransactionsFromBlock to update
