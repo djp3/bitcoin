@@ -537,8 +537,8 @@ public:
     bool IsSpentKey(const CScript& scriptPubKey) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     void SetSpentKeyState(WalletBatch& batch, const uint256& hash, unsigned int n, bool used, std::set<CTxDestination>& tx_destinations) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
-    /** Display address on an external signer. Returns false if external signer support is not compiled */
-    bool DisplayAddress(const CTxDestination& dest) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+    /** Display address on an external signer. */
+    util::Result<void> DisplayAddress(const CTxDestination& dest) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
     bool IsLockedCoin(const COutPoint& output) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     bool LockCoin(const COutPoint& output, WalletBatch* batch = nullptr) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
@@ -938,6 +938,7 @@ public:
 
     //! Returns all unique ScriptPubKeyMans in m_internal_spk_managers and m_external_spk_managers
     std::set<ScriptPubKeyMan*> GetActiveScriptPubKeyMans() const;
+    bool IsActiveScriptPubKeyMan(const ScriptPubKeyMan& spkm) const;
 
     //! Returns all unique ScriptPubKeyMans
     std::set<ScriptPubKeyMan*> GetAllScriptPubKeyMans() const;
@@ -1013,6 +1014,8 @@ public:
     //! @param[in] internal Whether this ScriptPubKeyMan provides change addresses
     void DeactivateScriptPubKeyMan(uint256 id, OutputType type, bool internal);
 
+    //! Create new DescriptorScriptPubKeyMan and add it to the wallet
+    DescriptorScriptPubKeyMan& SetupDescriptorScriptPubKeyMan(WalletBatch& batch, const CExtKey& master_key, const OutputType& output_type, bool internal) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     //! Create new DescriptorScriptPubKeyMans and add them to the wallet
     void SetupDescriptorScriptPubKeyMans(const CExtKey& master_key) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     void SetupDescriptorScriptPubKeyMans() EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
@@ -1049,6 +1052,13 @@ public:
     void CacheNewScriptPubKeys(const std::set<CScript>& spks, ScriptPubKeyMan* spkm);
 
     void TopUpCallback(const std::set<CScript>& spks, ScriptPubKeyMan* spkm) override;
+
+    //! Retrieve the xpubs in use by the active descriptors
+    std::set<CExtPubKey> GetActiveHDPubKeys() const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
+    //! Find the private key for the given key id from the wallet's descriptors, if available
+    //! Returns nullopt when no descriptor has the key or if the wallet is locked.
+    std::optional<CKey> GetKey(const CKeyID& keyid) const;
 };
 
 /**

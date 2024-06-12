@@ -5,9 +5,7 @@
 
 #include <wallet/wallet.h>
 
-#if defined(HAVE_CONFIG_H)
-#include <config/bitcoin-config.h>
-#endif
+#include <config/bitcoin-config.h> // IWYU pragma: keep
 #include <addresstype.h>
 #include <blockfilter.h>
 #include <chain.h>
@@ -375,7 +373,12 @@ std::shared_ptr<CWallet> CreateWallet(WalletContext& context, const std::string&
     uint64_t wallet_creation_flags = options.create_flags;
     const SecureString& passphrase = options.create_passphrase;
 
+    ArgsManager& args = *Assert(context.args);
+
     if (wallet_creation_flags & WALLET_FLAG_DESCRIPTORS) options.require_format = DatabaseFormat::SQLITE;
+    else if (args.GetBoolArg("-swapbdbendian", false)) {
+        options.require_format = DatabaseFormat::BERKELEY_SWAP;
+    }
 
     // Indicate that the wallet is actually supposed to be blank and not just blank to make it encrypted
     bool create_blank = (wallet_creation_flags & WALLET_FLAG_BLANK_WALLET);
@@ -2667,7 +2670,7 @@ void ReserveDestination::ReturnDestination()
     address = CNoDestination();
 }
 
-bool CWallet::DisplayAddress(const CTxDestination& dest)
+util::Result<void> CWallet::DisplayAddress(const CTxDestination& dest)
 {
     CScript scriptPubKey = GetScriptForDestination(dest);
     for (const auto& spk_man : GetScriptPubKeyMans(scriptPubKey)) {
@@ -2676,9 +2679,9 @@ bool CWallet::DisplayAddress(const CTxDestination& dest)
             continue;
         }
         ExternalSigner signer = ExternalSignerScriptPubKeyMan::GetExternalSigner();
-        return signer_spk_man->DisplayAddress(scriptPubKey, signer);
+        return signer_spk_man->DisplayAddress(dest, signer);
     }
-    return false;
+    return util::Error{_("There is no ScriptPubKeyManager for this address")};
 }
 
 bool CWallet::LockCoin(const COutPoint& output, WalletBatch* batch)
@@ -3497,6 +3500,17 @@ std::set<ScriptPubKeyMan*> CWallet::GetActiveScriptPubKeyMans() const
     return spk_mans;
 }
 
+bool CWallet::IsActiveScriptPubKeyMan(const ScriptPubKeyMan& spkm) const
+{
+    for (const auto& [_, ext_spkm] : m_external_spk_managers) {
+        if (ext_spkm == &spkm) return true;
+    }
+    for (const auto& [_, int_spkm] : m_internal_spk_managers) {
+        if (int_spkm == &spkm) return true;
+    }
+    return false;
+}
+
 std::set<ScriptPubKeyMan*> CWallet::GetAllScriptPubKeyMans() const
 {
     std::set<ScriptPubKeyMan*> spk_mans;
@@ -3651,6 +3665,26 @@ DescriptorScriptPubKeyMan& CWallet::LoadDescriptorScriptPubKeyMan(uint256 id, Wa
     return *spk_manager;
 }
 
+DescriptorScriptPubKeyMan& CWallet::SetupDescriptorScriptPubKeyMan(WalletBatch& batch, const CExtKey& master_key, const OutputType& output_type, bool internal)
+{
+    AssertLockHeld(cs_wallet);
+    auto spk_manager = std::unique_ptr<DescriptorScriptPubKeyMan>(new DescriptorScriptPubKeyMan(*this, m_keypool_size));
+    if (IsCrypted()) {
+        if (IsLocked()) {
+            throw std::runtime_error(std::string(__func__) + ": Wallet is locked, cannot setup new descriptors");
+        }
+        if (!spk_manager->CheckDecryptionKey(vMasterKey) && !spk_manager->Encrypt(vMasterKey, &batch)) {
+            throw std::runtime_error(std::string(__func__) + ": Could not encrypt new descriptors");
+        }
+    }
+    spk_manager->SetupDescriptorGeneration(batch, master_key, output_type, internal);
+    DescriptorScriptPubKeyMan* out = spk_manager.get();
+    uint256 id = spk_manager->GetID();
+    AddScriptPubKeyMan(id, std::move(spk_manager));
+    AddActiveScriptPubKeyManWithDb(batch, id, output_type, internal);
+    return *out;
+}
+
 void CWallet::SetupDescriptorScriptPubKeyMans(const CExtKey& master_key)
 {
     AssertLockHeld(cs_wallet);
@@ -3661,19 +3695,7 @@ void CWallet::SetupDescriptorScriptPubKeyMans(const CExtKey& master_key)
 
     for (bool internal : {false, true}) {
         for (OutputType t : OUTPUT_TYPES) {
-            auto spk_manager = std::unique_ptr<DescriptorScriptPubKeyMan>(new DescriptorScriptPubKeyMan(*this, m_keypool_size));
-            if (IsCrypted()) {
-                if (IsLocked()) {
-                    throw std::runtime_error(std::string(__func__) + ": Wallet is locked, cannot setup new descriptors");
-                }
-                if (!spk_manager->CheckDecryptionKey(vMasterKey) && !spk_manager->Encrypt(vMasterKey, &batch)) {
-                    throw std::runtime_error(std::string(__func__) + ": Could not encrypt new descriptors");
-                }
-            }
-            spk_manager->SetupDescriptorGeneration(batch, master_key, t, internal);
-            uint256 id = spk_manager->GetID();
-            AddScriptPubKeyMan(id, std::move(spk_manager));
-            AddActiveScriptPubKeyManWithDb(batch, id, t, internal);
+            SetupDescriptorScriptPubKeyMan(batch, master_key, t, internal);
         }
     }
 
@@ -4500,5 +4522,41 @@ void CWallet::TopUpCallback(const std::set<CScript>& spks, ScriptPubKeyMan* spkm
 {
     // Update scriptPubKey cache
     CacheNewScriptPubKeys(spks, spkm);
+}
+
+std::set<CExtPubKey> CWallet::GetActiveHDPubKeys() const
+{
+    AssertLockHeld(cs_wallet);
+
+    Assert(IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
+
+    std::set<CExtPubKey> active_xpubs;
+    for (const auto& spkm : GetActiveScriptPubKeyMans()) {
+        const DescriptorScriptPubKeyMan* desc_spkm = dynamic_cast<DescriptorScriptPubKeyMan*>(spkm);
+        assert(desc_spkm);
+        LOCK(desc_spkm->cs_desc_man);
+        WalletDescriptor w_desc = desc_spkm->GetWalletDescriptor();
+
+        std::set<CPubKey> desc_pubkeys;
+        std::set<CExtPubKey> desc_xpubs;
+        w_desc.descriptor->GetPubKeys(desc_pubkeys, desc_xpubs);
+        active_xpubs.merge(std::move(desc_xpubs));
+    }
+    return active_xpubs;
+}
+
+std::optional<CKey> CWallet::GetKey(const CKeyID& keyid) const
+{
+    Assert(IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
+
+    for (const auto& spkm : GetAllScriptPubKeyMans()) {
+        const DescriptorScriptPubKeyMan* desc_spkm = dynamic_cast<DescriptorScriptPubKeyMan*>(spkm);
+        assert(desc_spkm);
+        LOCK(desc_spkm->cs_desc_man);
+        if (std::optional<CKey> key = desc_spkm->GetKey(keyid)) {
+            return key;
+        }
+    }
+    return std::nullopt;
 }
 } // namespace wallet

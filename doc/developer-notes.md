@@ -13,7 +13,6 @@ Developer Notes
     - [Development tips and tricks](#development-tips-and-tricks)
         - [Compiling for debugging](#compiling-for-debugging)
         - [Show sources in debugging](#show-sources-in-debugging)
-        - [Compiling for gprof profiling](#compiling-for-gprof-profiling)
         - [`debug.log`](#debuglog)
         - [Signet, testnet, and regtest modes](#signet-testnet-and-regtest-modes)
         - [DEBUG_LOCKORDER](#debug_lockorder)
@@ -115,6 +114,8 @@ code.
     Use `reinterpret_cast` and `const_cast` as appropriate.
   - Prefer [`list initialization ({})`](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Res-list) where possible.
     For example `int x{0};` instead of `int x = 0;` or `int x(0);`
+  - Recursion is checked by clang-tidy and thus must be made explicit. Use
+    `NOLINTNEXTLINE(misc-no-recursion)` to suppress the check.
 
 For function calls a namespace should be specified explicitly, unless such functions have been declared within it.
 Otherwise, [argument-dependent lookup](https://en.cppreference.com/w/cpp/language/adl), also known as ADL, could be
@@ -332,7 +333,7 @@ Recommendations:
 - Avoid linking to external documentation; links can break.
 
 - Javadoc and all valid Doxygen comments are stripped from Doxygen source code
-  previews (`STRIP_CODE_COMMENTS = YES` in [Doxyfile.in](doc/Doxyfile.in)). If
+  previews (`STRIP_CODE_COMMENTS = YES` in [Doxyfile.in](/doc/Doxyfile.in)). If
   you want a comment to be preserved, it must instead use `//` or `/* */`.
 
 ### Generating Documentation
@@ -383,10 +384,6 @@ ln -s /path/to/project/root/src src
 ```
 
 3. Use `debugedit` to modify debug information in the binary.
-
-### Compiling for gprof profiling
-
-Run configure with the `--enable-gprof` option, then make.
 
 ### `debug.log`
 
@@ -494,6 +491,10 @@ make cov
 # which covers unit tests, and `./total.coverage/index.html`, which covers
 # unit and functional tests.
 ```
+
+Additional LCOV options can be specified using `LCOV_OPTS`, but may be dependant
+on the version of LCOV. For example, when using LCOV `2.x`, branch coverage can be
+enabled by setting `LCOV_OPTS="--rc branch_coverage=1"`, when configuring.
 
 ### Performance profiling with perf
 
@@ -1333,8 +1334,7 @@ Release notes should be written for any PR that:
 
 Release notes should be added to a PR-specific release note file at
 `/doc/release-notes-<PR number>.md` to avoid conflicts between multiple PRs.
-All `release-notes*` files are merged into a single
-[/doc/release-notes.md](/doc/release-notes.md) file prior to the release.
+All `release-notes*` files are merged into a single `release-notes-<version>.md` file prior to the release.
 
 RPC interface guidelines
 --------------------------
