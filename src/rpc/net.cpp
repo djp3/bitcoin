@@ -16,6 +16,7 @@
 #include <netbase.h>
 #include <node/context.h>
 #include <node/protocol_version.h>
+#include <node/warnings.h>
 #include <policy/settings.h>
 #include <protocol.h>
 #include <rpc/blockchain.h>
@@ -35,6 +36,8 @@
 #include <univalue.h>
 
 using node::NodeContext;
+using util::Join;
+using util::TrimString;
 
 const std::vector<std::string> CONNECTION_TYPE_DOC{
         "outbound-full-relay (default automatic connections)",
@@ -713,7 +716,7 @@ static RPCHelpMan getnetworkinfo()
         }
     }
     obj.pushKV("localaddresses", std::move(localAddresses));
-    obj.pushKV("warnings", GetNodeWarnings(IsDeprecatedRPCEnabled("warnings")));
+    obj.pushKV("warnings", node::GetWarningsForRpc(*CHECK_NONFATAL(node.warnings), IsDeprecatedRPCEnabled("warnings")));
     return obj;
 },
     };
