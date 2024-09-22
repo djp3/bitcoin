@@ -50,23 +50,17 @@ darwin_STRIP=$(shell $(SHELL) $(.SHELLFLAGS) "command -v llvm-strip")
 #         Disable adhoc codesigning (for now) when using LLVM tooling, to avoid
 #         non-determinism issues with the Identifier field.
 
-darwin_CC=env -u C_INCLUDE_PATH -u CPLUS_INCLUDE_PATH \
-              -u OBJC_INCLUDE_PATH -u OBJCPLUS_INCLUDE_PATH -u CPATH \
-              -u LIBRARY_PATH \
-              $(clang_prog) --target=$(host) \
+darwin_CC=$(clang_prog) --target=$(host) \
               -isysroot$(OSX_SDK) -nostdlibinc \
               -iwithsysroot/usr/include -iframeworkwithsysroot/System/Library/Frameworks
 
-darwin_CXX=env -u C_INCLUDE_PATH -u CPLUS_INCLUDE_PATH \
-               -u OBJC_INCLUDE_PATH -u OBJCPLUS_INCLUDE_PATH -u CPATH \
-               -u LIBRARY_PATH \
-               $(clangxx_prog) --target=$(host) \
+darwin_CXX=$(clangxx_prog) --target=$(host) \
                -isysroot$(OSX_SDK) -nostdlibinc \
                -iwithsysroot/usr/include/c++/v1 \
                -iwithsysroot/usr/include -iframeworkwithsysroot/System/Library/Frameworks
 
-darwin_CFLAGS=-pipe -std=$(C_STANDARD) -mmacosx-version-min=$(OSX_MIN_VERSION)
-darwin_CXXFLAGS=-pipe -std=$(CXX_STANDARD) -mmacosx-version-min=$(OSX_MIN_VERSION)
+darwin_CFLAGS=-pipe -std=$(C_STANDARD) -mmacos-version-min=$(OSX_MIN_VERSION)
+darwin_CXXFLAGS=-pipe -std=$(CXX_STANDARD) -mmacos-version-min=$(OSX_MIN_VERSION)
 darwin_LDFLAGS=-Wl,-platform_version,macos,$(OSX_MIN_VERSION),$(OSX_SDK_VERSION)
 
 ifneq ($(build_os),darwin)
@@ -81,4 +75,7 @@ darwin_release_CXXFLAGS=$(darwin_release_CFLAGS)
 darwin_debug_CFLAGS=-O1 -g
 darwin_debug_CXXFLAGS=$(darwin_debug_CFLAGS)
 
-darwin_cmake_system=Darwin
+darwin_cmake_system_name=Darwin
+# Darwin version, which corresponds to OSX_MIN_VERSION.
+# See https://en.wikipedia.org/wiki/Darwin_(operating_system)
+darwin_cmake_system_version=20.1

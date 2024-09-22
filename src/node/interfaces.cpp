@@ -8,12 +8,14 @@
 #include <chain.h>
 #include <chainparams.h>
 #include <common/args.h>
+#include <consensus/validation.h>
 #include <deploymentstatus.h>
 #include <external_signer.h>
 #include <index/blockfilterindex.h>
 #include <init.h>
 #include <interfaces/chain.h>
 #include <interfaces/handler.h>
+#include <interfaces/mining.h>
 #include <interfaces/node.h>
 #include <interfaces/wallet.h>
 #include <kernel/chain.h>
@@ -30,6 +32,7 @@
 #include <node/context.h>
 #include <node/interface_ui.h>
 #include <node/mini_miner.h>
+#include <node/miner.h>
 #include <node/transaction.h>
 #include <node/types.h>
 #include <node/warnings.h>
@@ -64,13 +67,16 @@
 
 #include <boost/signals2/signal.hpp>
 
+using interfaces::BlockTemplate;
 using interfaces::BlockTip;
 using interfaces::Chain;
 using interfaces::FoundBlock;
 using interfaces::Handler;
 using interfaces::MakeSignalHandler;
+using interfaces::Mining;
 using interfaces::Node;
 using interfaces::WalletLoader;
+using node::BlockAssembler;
 using util::Join;
 
 namespace node {
@@ -95,7 +101,7 @@ public:
     void initParameterInteraction() override { InitParameterInteraction(args()); }
     bilingual_str getWarnings() override { return Join(Assert(m_context->warnings)->GetMessages(), Untranslated("<hr />")); }
     int getExitStatus() override { return Assert(m_context)->exit_status.load(); }
-    uint32_t getLogCategories() override { return LogInstance().GetCategoryMask(); }
+    BCLog::CategoryMask getLogCategories() override { return LogInstance().GetCategoryMask(); }
     bool baseInitialize() override
     {
         if (!AppInitBasicSetup(args(), Assert(context())->exit_status)) return false;
@@ -273,6 +279,7 @@ public:
     int64_t getTotalBytesSent() override { return m_context->connman ? m_context->connman->GetTotalBytesSent() : 0; }
     size_t getMempoolSize() override { return m_context->mempool ? m_context->mempool->size() : 0; }
     size_t getMempoolDynamicUsage() override { return m_context->mempool ? m_context->mempool->DynamicMemoryUsage() : 0; }
+    size_t getMempoolMaxUsage() override { return m_context->mempool ? m_context->mempool->m_opts.max_size_bytes : 0; }
     bool getHeaderTip(int& height, int64_t& block_time) override
     {
         LOCK(::cs_main);
@@ -283,6 +290,13 @@ public:
             return true;
         }
         return false;
+    }
+    std::map<CNetAddr, LocalServiceInfo> getNetLocalAddresses() override
+    {
+        if (m_context->connman)
+            return m_context->connman->getNetLocalAddresses();
+        else
+            return {};
     }
     int getNumBlocks() override
     {
@@ -801,16 +815,34 @@ public:
         });
         return result;
     }
-    bool updateRwSetting(const std::string& name, const common::SettingsValue& value, bool write) override
+    bool updateRwSetting(const std::string& name,
+                         const interfaces::SettingsUpdate& update_settings_func) override
     {
+        std::optional<interfaces::SettingsAction> action;
         args().LockSettings([&](common::Settings& settings) {
-            if (value.isNull()) {
-                settings.rw_settings.erase(name);
+            if (auto* value = common::FindKey(settings.rw_settings, name)) {
+                action = update_settings_func(*value);
+                if (value->isNull()) settings.rw_settings.erase(name);
             } else {
-                settings.rw_settings[name] = value;
+                UniValue new_value;
+                action = update_settings_func(new_value);
+                if (!new_value.isNull()) settings.rw_settings[name] = std::move(new_value);
             }
         });
-        return !write || args().WriteSettingsFile();
+        if (!action) return false;
+        // Now dump value to disk if requested
+        return *action != interfaces::SettingsAction::WRITE || args().WriteSettingsFile();
+    }
+    bool overwriteRwSetting(const std::string& name, common::SettingsValue value, interfaces::SettingsAction action) override
+    {
+        return updateRwSetting(name, [&](common::SettingsValue& settings) {
+            settings = std::move(value);
+            return action;
+        });
+    }
+    bool deleteRwSettings(const std::string& name, interfaces::SettingsAction action) override
+    {
+        return overwriteRwSetting(name, {}, action);
     }
     void requestMempoolTransactions(Notifications& notifications) override
     {
@@ -831,10 +863,115 @@ public:
     ValidationSignals& validation_signals() { return *Assert(m_node.validation_signals); }
     NodeContext& m_node;
 };
+
+class BlockTemplateImpl : public BlockTemplate
+{
+public:
+    explicit BlockTemplateImpl(std::unique_ptr<CBlockTemplate> block_template) : m_block_template(std::move(block_template))
+    {
+        assert(m_block_template);
+    }
+
+    CBlockHeader getBlockHeader() override
+    {
+        return m_block_template->block;
+    }
+
+    CBlock getBlock() override
+    {
+        return m_block_template->block;
+    }
+
+    std::vector<CAmount> getTxFees() override
+    {
+        return m_block_template->vTxFees;
+    }
+
+    std::vector<int64_t> getTxSigops() override
+    {
+        return m_block_template->vTxSigOpsCost;
+    }
+
+    CTransactionRef getCoinbaseTx() override
+    {
+        return m_block_template->block.vtx[0];
+    }
+
+    std::vector<unsigned char> getCoinbaseCommitment() override
+    {
+        return m_block_template->vchCoinbaseCommitment;
+    }
+
+    int getWitnessCommitmentIndex() override
+    {
+        return GetWitnessCommitmentIndex(m_block_template->block);
+    }
+
+    const std::unique_ptr<CBlockTemplate> m_block_template;
+};
+
+class MinerImpl : public Mining
+{
+public:
+    explicit MinerImpl(NodeContext& node) : m_node(node) {}
+
+    bool isTestChain() override
+    {
+        return chainman().GetParams().IsTestChain();
+    }
+
+    bool isInitialBlockDownload() override
+    {
+        return chainman().IsInitialBlockDownload();
+    }
+
+    std::optional<uint256> getTipHash() override
+    {
+        LOCK(::cs_main);
+        CBlockIndex* tip{chainman().ActiveChain().Tip()};
+        if (!tip) return {};
+        return tip->GetBlockHash();
+    }
+
+    bool processNewBlock(const std::shared_ptr<const CBlock>& block, bool* new_block) override
+    {
+        return chainman().ProcessNewBlock(block, /*force_processing=*/true, /*min_pow_checked=*/true, /*new_block=*/new_block);
+    }
+
+    unsigned int getTransactionsUpdated() override
+    {
+        return context()->mempool->GetTransactionsUpdated();
+    }
+
+    bool testBlockValidity(const CBlock& block, bool check_merkle_root, BlockValidationState& state) override
+    {
+        LOCK(cs_main);
+        CBlockIndex* tip{chainman().ActiveChain().Tip()};
+        // Fail if the tip updated before the lock was taken
+        if (block.hashPrevBlock != tip->GetBlockHash()) {
+            state.Error("Block does not connect to current chain tip.");
+            return false;
+        }
+
+        return TestBlockValidity(state, chainman().GetParams(), chainman().ActiveChainstate(), block, tip, /*fCheckPOW=*/false, check_merkle_root);
+    }
+
+    std::unique_ptr<BlockTemplate> createNewBlock(const CScript& script_pub_key, const BlockCreateOptions& options) override
+    {
+        BlockAssembler::Options assemble_options{options};
+        ApplyArgsManOptions(*Assert(m_node.args), assemble_options);
+        return std::make_unique<BlockTemplateImpl>(BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), assemble_options}.CreateNewBlock(script_pub_key));
+    }
+
+    NodeContext* context() override { return &m_node; }
+    ChainstateManager& chainman() { return *Assert(m_node.chainman); }
+    NodeContext& m_node;
+};
 } // namespace
 } // namespace node
 
 namespace interfaces {
 std::unique_ptr<Node> MakeNode(node::NodeContext& context) { return std::make_unique<node::NodeImpl>(context); }
 std::unique_ptr<Chain> MakeChain(node::NodeContext& context) { return std::make_unique<node::ChainImpl>(context); }
+std::unique_ptr<Mining> MakeMining(node::NodeContext& context) { return std::make_unique<node::MinerImpl>(context); }
 } // namespace interfaces

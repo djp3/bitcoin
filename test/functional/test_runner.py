@@ -264,9 +264,9 @@ BASE_SCRIPTS = [
     'p2p_invalid_tx.py --v2transport',
     'p2p_v2_transport.py',
     'p2p_v2_encrypted.py',
-    'p2p_v2_earlykeyresponse.py',
+    'p2p_v2_misbehaving.py',
     'example_test.py',
-    'mempool_accept_v3.py',
+    'mempool_truc.py',
     'wallet_txn_doublespend.py --legacy-wallet',
     'wallet_multisig_descriptor_psbt.py --descriptors',
     'wallet_txn_doublespend.py --descriptors',
@@ -284,6 +284,7 @@ BASE_SCRIPTS = [
     'mempool_package_limits.py',
     'mempool_package_rbf.py',
     'feature_versionbits_warning.py',
+    'feature_blocksxor.py',
     'rpc_preciousblock.py',
     'wallet_importprunedfunds.py --legacy-wallet',
     'wallet_importprunedfunds.py --descriptors',
@@ -405,6 +406,7 @@ BASE_SCRIPTS = [
     'feature_shutdown.py',
     'wallet_migration.py',
     'p2p_ibd_txrelay.py',
+    'p2p_seednode.py',
     # Don't append tests at the end to avoid merge conflicts
     # Put them in a random line within the section that fits their approximate run-time
 ]
@@ -486,7 +488,7 @@ def main():
 
     if not enable_bitcoind:
         print("No functional tests to run.")
-        print("Rerun ./configure with --with-daemon and then make")
+        print("Re-compile with the -DBUILD_DAEMON=ON build option")
         sys.exit(1)
 
     # Build list of tests
@@ -520,15 +522,24 @@ def main():
         test_list += BASE_SCRIPTS
 
     # Remove the test cases that the user has explicitly asked to exclude.
+    # The user can specify a test case with or without the .py extension.
     if args.exclude:
-        exclude_tests = [test.split('.py')[0] for test in args.exclude.split(',')]
-        for exclude_test in exclude_tests:
-            # Remove <test_name>.py and <test_name>.py --arg from the test list
-            exclude_list = [test for test in test_list if test.split('.py')[0] == exclude_test]
+        def print_warning_missing_test(test_name):
+            print("{}WARNING!{} Test '{}' not found in current test list.".format(BOLD[1], BOLD[0], test_name))
+        def remove_tests(exclude_list):
+            if not exclude_list:
+                print_warning_missing_test(exclude_test)
             for exclude_item in exclude_list:
                 test_list.remove(exclude_item)
-            if not exclude_list:
-                print("{}WARNING!{} Test '{}' not found in current test list.".format(BOLD[1], BOLD[0], exclude_test))
+
+        exclude_tests = [test.strip() for test in args.exclude.split(",")]
+        for exclude_test in exclude_tests:
+            # A space in the name indicates it has arguments such as "wallet_basic.py --descriptors"
+            if ' ' in exclude_test:
+                remove_tests([test for test in test_list if test.replace('.py', '') == exclude_test.replace('.py', '')])
+            else:
+                # Exclude all variants of a test
+                remove_tests([test for test in test_list if test.split('.py')[0] == exclude_test.split('.py')[0]])
 
     if args.filter:
         test_list = list(filter(re.compile(args.filter).search, test_list))
@@ -559,7 +570,6 @@ def main():
 
     run_tests(
         test_list=test_list,
-        src_dir=config["environment"]["SRCDIR"],
         build_dir=config["environment"]["BUILDDIR"],
         tmpdir=tmpdir,
         jobs=args.jobs,
@@ -571,7 +581,7 @@ def main():
         results_filepath=results_filepath,
     )
 
-def run_tests(*, test_list, src_dir, build_dir, tmpdir, jobs=1, enable_coverage=False, args=None, combined_logs_len=0, failfast=False, use_term_control, results_filepath=None):
+def run_tests(*, test_list, build_dir, tmpdir, jobs=1, enable_coverage=False, args=None, combined_logs_len=0, failfast=False, use_term_control, results_filepath=None):
     args = args or []
 
     # Warn if bitcoind is already running
@@ -594,7 +604,7 @@ def run_tests(*, test_list, src_dir, build_dir, tmpdir, jobs=1, enable_coverage=
         print(f"{BOLD[1]}WARNING!{BOLD[0]} There may be insufficient free space in {tmpdir} to run the Bitcoin functional test suite. "
               f"Running the test suite with fewer than {min_space // (1024 * 1024)} MB of free space might cause tests to fail.")
 
-    tests_dir = src_dir + '/test/functional/'
+    tests_dir = f"{build_dir}/test/functional/"
     # This allows `test_runner.py` to work from an out-of-source build directory using a symlink,
     # a hard link or a copy on any platform. See https://github.com/bitcoin/bitcoin/pull/27561.
     sys.path.append(tests_dir)

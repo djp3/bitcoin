@@ -29,10 +29,11 @@ static const uint32_t DEFAULT_MAX_ORPHAN_TRANSACTIONS{100};
 static const uint32_t DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN{100};
 static const bool DEFAULT_PEERBLOOMFILTERS = false;
 static const bool DEFAULT_PEERBLOCKFILTERS = false;
-/** Threshold for marking a node to be discouraged, e.g. disconnected and added to the discouragement filter. */
-static const int DISCOURAGEMENT_THRESHOLD{100};
 /** Maximum number of outstanding CMPCTBLOCK requests for the same block. */
 static const unsigned int MAX_CMPCTBLOCKS_INFLIGHT_PER_BLOCK = 3;
+/** Number of headers sent in one getheaders result. We rely on the assumption that if a peer sends
+ *  less than this number, we reached its tip. Changing this value is a protocol upgrade. */
+static const unsigned int MAX_HEADERS_RESULTS = 2000;
 
 struct CNodeStateStats {
     int nSyncHeight = -1;
@@ -73,12 +74,15 @@ public:
         //! Whether or not the internal RNG behaves deterministically (this is
         //! a test-only option).
         bool deterministic_rng{false};
+        //! Number of headers sent in one getheaders message result (this is
+        //! a test-only option).
+        uint32_t max_headers_result{MAX_HEADERS_RESULTS};
     };
 
     static std::unique_ptr<PeerManager> make(CConnman& connman, AddrMan& addrman,
                                              BanMan* banman, ChainstateManager& chainman,
                                              CTxMemPool& pool, node::Warnings& warnings, Options opts);
-    virtual ~PeerManager() { }
+    virtual ~PeerManager() = default;
 
     /**
      * Attempt to manually fetch block from a given peer. We must already have the header.
@@ -108,7 +112,7 @@ public:
     virtual void SetBestBlock(int height, std::chrono::seconds time) = 0;
 
     /* Public for unit testing. */
-    virtual void UnitTestMisbehaving(NodeId peer_id, int howmuch) = 0;
+    virtual void UnitTestMisbehaving(NodeId peer_id) = 0;
 
     /**
      * Evict extra outbound peers. If we think our tip may be stale, connect to an extra outbound.
