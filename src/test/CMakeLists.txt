@@ -125,6 +125,7 @@ add_executable(test_bitcoin
   torcontrol_tests.cpp
   transaction_tests.cpp
   translation_tests.cpp
+  txdownload_tests.cpp
   txindex_tests.cpp
   txpackage_tests.cpp
   txreconciliation_tests.cpp
@@ -135,6 +136,7 @@ add_executable(test_bitcoin
   util_string_tests.cpp
   util_tests.cpp
   util_threadnames_tests.cpp
+  util_trace_tests.cpp
   validation_block_tests.cpp
   validation_chainstate_tests.cpp
   validation_chainstatemanager_tests.cpp
@@ -152,7 +154,7 @@ target_link_libraries(test_bitcoin
   minisketch
   secp256k1
   Boost::headers
-  $<TARGET_NAME_IF_EXISTS:libevent::libevent>
+  libevent::extra
 )
 
 if(ENABLE_WALLET)
@@ -160,14 +162,6 @@ if(ENABLE_WALLET)
 endif()
 
 if(WITH_MULTIPROCESS)
-  add_library(bitcoin_ipc_test STATIC EXCLUDE_FROM_ALL
-    ipc_test.cpp
-  )
-
-  target_capnp_sources(bitcoin_ipc_test ${PROJECT_SOURCE_DIR}
-    ipc_test.capnp
-  )
-
   target_link_libraries(bitcoin_ipc_test
     PRIVATE
       core_interface

@@ -3,7 +3,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <config/bitcoin-config.h> // IWYU pragma: keep
+#include <bitcoin-build-config.h> // IWYU pragma: keep
 
 #include <init.h>
 
@@ -123,17 +123,19 @@ using node::ApplyArgsManOptions;
 using node::BlockManager;
 using node::CacheSizes;
 using node::CalculateCacheSizes;
+using node::ChainstateLoadResult;
+using node::ChainstateLoadStatus;
 using node::DEFAULT_PERSIST_MEMPOOL;
 using node::DEFAULT_PRINT_MODIFIED_FEE;
 using node::DEFAULT_STOPATHEIGHT;
 using node::DumpMempool;
-using node::LoadMempool;
+using node::ImportBlocks;
 using node::KernelNotifications;
 using node::LoadChainstate;
+using node::LoadMempool;
 using node::MempoolPath;
 using node::NodeContext;
 using node::ShouldPersistMempool;
-using node::ImportBlocks;
 using node::VerifyLoadedChainstate;
 using util::Join;
 using util::ReplaceAll;
@@ -205,7 +207,14 @@ void InitContext(NodeContext& node)
     g_shutdown.emplace();
 
     node.args = &gArgs;
-    node.shutdown = &*g_shutdown;
+    node.shutdown_signal = &*g_shutdown;
+    node.shutdown_request = [&node] {
+        assert(node.shutdown_signal);
+        if (!(*node.shutdown_signal)()) return false;
+        // Wake any threads that may be waiting for the tip to change.
+        if (node.notifications) WITH_LOCK(node.notifications->m_tip_block_mutex, node.notifications->m_tip_block_cv.notify_all());
+        return true;
+    };
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -233,7 +242,7 @@ void InitContext(NodeContext& node)
 
 bool ShutdownRequested(node::NodeContext& node)
 {
-    return bool{*Assert(node.shutdown)};
+    return bool{*Assert(node.shutdown_signal)};
 }
 
 #if HAVE_SYSTEM
@@ -429,20 +438,6 @@ static void registerSignalHandler(int signal, void(*handler)(int))
 }
 #endif
 
-static boost::signals2::connection rpc_notify_block_change_connection;
-static void OnRPCStarted()
-{
-    rpc_notify_block_change_connection = uiInterface.NotifyBlockTip_connect(std::bind(RPCNotifyBlockChange, std::placeholders::_2));
-}
-
-static void OnRPCStopped()
-{
-    rpc_notify_block_change_connection.disconnect();
-    RPCNotifyBlockChange(nullptr);
-    g_best_block_cv.notify_all();
-    LogDebug(BCLog::RPC, "RPC stopped.\n");
-}
-
 void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
 {
     SetupHelpOptions(argsman);
@@ -566,16 +561,9 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-peertimeout=<n>", strprintf("Specify a p2p connection timeout delay in seconds. After connecting to a peer, wait this amount of time before considering disconnection based on inactivity (minimum: 1, default: %d)", DEFAULT_PEER_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torcontrol=<ip>:<port>", strprintf("Tor control host and port to use if onion listening enabled (default: %s). If no port is specified, the default port of %i will be used.", DEFAULT_TOR_CONTROL, DEFAULT_TOR_CONTROL_PORT), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torpassword=<pass>", "Tor control port password (default: empty)", ArgsManager::ALLOW_ANY | ArgsManager::SENSITIVE, OptionsCategory::CONNECTION);
-#ifdef USE_UPNP
-    argsman.AddArg("-upnp", strprintf("Use UPnP to map the listening port (default: %u)", DEFAULT_UPNP), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
-#else
-    hidden_args.emplace_back("-upnp");
-#endif
-#ifdef USE_NATPMP
-    argsman.AddArg("-natpmp", strprintf("Use NAT-PMP to map the listening port (default: %u)", DEFAULT_NATPMP), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
-#else
-    hidden_args.emplace_back("-natpmp");
-#endif // USE_NATPMP
+    // UPnP support was dropped. We keep `-upnp` as a hidden arg to display a more user friendly error when set. TODO: remove (here and below) for 30.0. NOTE: removing this option may prevent the GUI from starting, see https://github.com/bitcoin-core/gui/issues/843.
+    argsman.AddArg("-upnp", "", ArgsManager::ALLOW_ANY, OptionsCategory::HIDDEN);
+    argsman.AddArg("-natpmp", strprintf("Use PCP or NAT-PMP to map the listening port (default: %u)", DEFAULT_NATPMP), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-whitebind=<[permissions@]addr>", "Bind to the given address and add permission flags to the peers connecting to it. "
         "Use [host]:port notation for IPv6. Allowed permissions: " + Join(NET_PERMISSIONS_DOC, ", ") + ". "
         "Specify multiple permissions separated by commas (default: download,noban,mempool,relay). Can be specified multiple times.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -633,7 +621,7 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
                    strprintf("Maximum tip age in seconds to consider node in initial block download (default: %u)",
                              Ticks<std::chrono::seconds>(DEFAULT_MAX_TIP_AGE)),
                    ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::DEBUG_TEST);
-    argsman.AddArg("-printpriority", strprintf("Log transaction fee rate in " + CURRENCY_UNIT + "/kvB when mining blocks (default: %u)", DEFAULT_PRINT_MODIFIED_FEE), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::DEBUG_TEST);
+    argsman.AddArg("-printpriority", strprintf("Log transaction fee rate in %s/kvB when mining blocks (default: %u)", CURRENCY_UNIT, DEFAULT_PRINT_MODIFIED_FEE), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-uacomment=<cmt>", "Append comment to the user agent string", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
 
     SetupChainParamsBaseOptions(argsman);
@@ -649,7 +637,6 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
                              "is of this size or less (default: %u)",
                              MAX_OP_RETURN_RELAY),
                    ArgsManager::ALLOW_ANY, OptionsCategory::NODE_RELAY);
-    argsman.AddArg("-mempoolfullrbf", strprintf("(DEPRECATED) Accept transaction replace-by-fee without requiring replaceability signaling (default: %u)", DEFAULT_MEMPOOL_FULL_RBF), ArgsManager::ALLOW_ANY, OptionsCategory::NODE_RELAY);
     argsman.AddArg("-permitbaremultisig", strprintf("Relay transactions creating non-P2SH multisig outputs (default: %u)", DEFAULT_PERMIT_BAREMULTISIG), ArgsManager::ALLOW_ANY,
                    OptionsCategory::NODE_RELAY);
     argsman.AddArg("-minrelaytxfee=<amt>", strprintf("Fees (in %s/kvB) smaller than this are considered zero fee for relaying, mining and transaction creation (default: %s)",
@@ -694,21 +681,6 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddHiddenArgs(hidden_args);
 }
 
-static bool fHaveGenesis = false;
-static GlobalMutex g_genesis_wait_mutex;
-static std::condition_variable g_genesis_wait_cv;
-
-static void BlockNotifyGenesisWait(const CBlockIndex* pBlockIndex)
-{
-    if (pBlockIndex != nullptr) {
-        {
-            LOCK(g_genesis_wait_mutex);
-            fHaveGenesis = true;
-        }
-        g_genesis_wait_cv.notify_all();
-    }
-}
-
 #if HAVE_SYSTEM
 static void StartupNotify(const ArgsManager& args)
 {
@@ -723,9 +695,7 @@ static void StartupNotify(const ArgsManager& args)
 static bool AppInitServers(NodeContext& node)
 {
     const ArgsManager& args = *Assert(node.args);
-    RPCServer::OnStarted(&OnRPCStarted);
-    RPCServer::OnStopped(&OnRPCStopped);
-    if (!InitHTTPServer(*Assert(node.shutdown))) {
+    if (!InitHTTPServer(*Assert(node.shutdown_signal))) {
         return false;
     }
     StartRPC();
@@ -766,8 +736,6 @@ void InitParameterInteraction(ArgsManager& args)
             LogInfo("parameter interaction: -proxy set -> setting -listen=0\n");
         // to protect privacy, do not map ports when a proxy is set. The user may still specify -listen=1
         // to listen locally, so don't rely on this happening through -listen below.
-        if (args.SoftSetBoolArg("-upnp", false))
-            LogInfo("parameter interaction: -proxy set -> setting -upnp=0\n");
         if (args.SoftSetBoolArg("-natpmp", false)) {
             LogInfo("parameter interaction: -proxy set -> setting -natpmp=0\n");
         }
@@ -778,8 +746,6 @@ void InitParameterInteraction(ArgsManager& args)
 
     if (!args.GetBoolArg("-listen", DEFAULT_LISTEN)) {
         // do not map ports or try to retrieve public IP when not listening (pointless)
-        if (args.SoftSetBoolArg("-upnp", false))
-            LogInfo("parameter interaction: -listen=0 -> setting -upnp=0\n");
         if (args.SoftSetBoolArg("-natpmp", false)) {
             LogInfo("parameter interaction: -listen=0 -> setting -natpmp=0\n");
         }
@@ -840,7 +806,7 @@ namespace { // Variables internal to initialization process only
 
 int nMaxConnections;
 int available_fds;
-ServiceFlags nLocalServices = ServiceFlags(NODE_NETWORK_LIMITED | NODE_WITNESS);
+ServiceFlags g_local_services = ServiceFlags(NODE_NETWORK_LIMITED | NODE_WITNESS);
 int64_t peer_connect_timeout;
 std::set<BlockFilterType> g_enabled_filter_types;
 
@@ -903,6 +869,12 @@ bool AppInitParameterInteraction(const ArgsManager& args)
 
     // also see: InitParameterInteraction()
 
+    // We drop UPnP support but kept the arg as hidden for now to display a friendlier error to user who have the
+    // option in their config. TODO: remove (here and above) for version 30.0.
+    if (args.IsArgSet("-upnp")) {
+        InitWarning(_("Option '-upnp' is set but UPnP support was dropped in version 29.0. Consider using '-natpmp' instead."));
+    }
+
     // Error if network-specific options (-addnode, -connect, etc) are
     // specified in default section of config file, but not overridden
     // on the command line or in this chain's section of the config file.
@@ -955,7 +927,7 @@ bool AppInitParameterInteraction(const ArgsManager& args)
 
     // Signal NODE_P2P_V2 if BIP324 v2 transport is enabled.
     if (args.GetBoolArg("-v2transport", DEFAULT_V2_TRANSPORT)) {
-        nLocalServices = ServiceFlags(nLocalServices | NODE_P2P_V2);
+        g_local_services = ServiceFlags(g_local_services | NODE_P2P_V2);
     }
 
     // Signal NODE_COMPACT_FILTERS if peerblockfilters and basic filters index are both enabled.
@@ -964,7 +936,7 @@ bool AppInitParameterInteraction(const ArgsManager& args)
             return InitError(_("Cannot set -peerblockfilters without -blockfilterindex."));
         }
 
-        nLocalServices = ServiceFlags(nLocalServices | NODE_COMPACT_FILTERS);
+        g_local_services = ServiceFlags(g_local_services | NODE_COMPACT_FILTERS);
     }
 
     if (args.GetIntArg("-prune", 0)) {
@@ -1049,7 +1021,7 @@ bool AppInitParameterInteraction(const ArgsManager& args)
     SetMockTime(args.GetIntArg("-mocktime", 0)); // SetMockTime(0) is a no-op
 
     if (args.GetBoolArg("-peerbloomfilters", DEFAULT_PEERBLOOMFILTERS))
-        nLocalServices = ServiceFlags(nLocalServices | NODE_BLOOM);
+        g_local_services = ServiceFlags(g_local_services | NODE_BLOOM);
 
     if (args.IsArgSet("-test")) {
         if (chainparams.GetChainType() != ChainType::REGTEST) {
@@ -1088,6 +1060,11 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         if (!blockman_result) {
             return InitError(util::ErrorString(blockman_result));
         }
+        CTxMemPool::Options mempool_opts{};
+        auto mempool_result{ApplyArgsManOptions(args, chainparams, mempool_opts)};
+        if (!mempool_result) {
+            return InitError(util::ErrorString(mempool_result));
+        }
     }
 
     return true;
@@ -1101,7 +1078,7 @@ static bool LockDataDirectory(bool probeOnly)
     case util::LockResult::ErrorWrite:
         return InitError(strprintf(_("Cannot write to data directory '%s'; check permissions."), fs::PathToString(datadir)));
     case util::LockResult::ErrorLock:
-        return InitError(strprintf(_("Cannot obtain a lock on data directory %s. %s is probably already running."), fs::PathToString(datadir), PACKAGE_NAME));
+        return InitError(strprintf(_("Cannot obtain a lock on data directory %s. %s is probably already running."), fs::PathToString(datadir), CLIENT_NAME));
     case util::LockResult::Success: return true;
     } // no default case, so the compiler can warn about missing cases
     assert(false);
@@ -1113,11 +1090,11 @@ bool AppInitSanityChecks(const kernel::Context& kernel)
     auto result{kernel::SanityChecks(kernel)};
     if (!result) {
         InitError(util::ErrorString(result));
-        return InitError(strprintf(_("Initialization sanity check failed. %s is shutting down."), PACKAGE_NAME));
+        return InitError(strprintf(_("Initialization sanity check failed. %s is shutting down."), CLIENT_NAME));
     }
 
     if (!ECC_InitSanityCheck()) {
-        return InitError(strprintf(_("Elliptic curve cryptography sanity check failure. %s is shutting down."), PACKAGE_NAME));
+        return InitError(strprintf(_("Elliptic curve cryptography sanity check failure. %s is shutting down."), CLIENT_NAME));
     }
 
     // Probe the data directory lock to give an early error message, if possible
@@ -1192,6 +1169,104 @@ bool CheckHostPortOptions(const ArgsManager& args) {
     return true;
 }
 
+// A GUI user may opt to retry once with do_reindex set if there is a failure during chainstate initialization.
+// The function therefore has to support re-entry.
+static ChainstateLoadResult InitAndLoadChainstate(
+    NodeContext& node,
+    bool do_reindex,
+    const bool do_reindex_chainstate,
+    CacheSizes& cache_sizes,
+    const ArgsManager& args)
+{
+    const CChainParams& chainparams = Params();
+    CTxMemPool::Options mempool_opts{
+        .check_ratio = chainparams.DefaultConsistencyChecks() ? 1 : 0,
+        .signals = node.validation_signals.get(),
+    };
+    Assert(ApplyArgsManOptions(args, chainparams, mempool_opts)); // no error can happen, already checked in AppInitParameterInteraction
+    bilingual_str mempool_error;
+    node.mempool = std::make_unique<CTxMemPool>(mempool_opts, mempool_error);
+    if (!mempool_error.empty()) {
+        return {ChainstateLoadStatus::FAILURE_FATAL, mempool_error};
+    }
+    LogPrintf("* Using %.1f MiB for in-memory UTXO set (plus up to %.1f MiB of unused mempool space)\n", cache_sizes.coins * (1.0 / 1024 / 1024), mempool_opts.max_size_bytes * (1.0 / 1024 / 1024));
+    ChainstateManager::Options chainman_opts{
+        .chainparams = chainparams,
+        .datadir = args.GetDataDirNet(),
+        .notifications = *node.notifications,
+        .signals = node.validation_signals.get(),
+    };
+    Assert(ApplyArgsManOptions(args, chainman_opts)); // no error can happen, already checked in AppInitParameterInteraction
+    BlockManager::Options blockman_opts{
+        .chainparams = chainman_opts.chainparams,
+        .blocks_dir = args.GetBlocksDirPath(),
+        .notifications = chainman_opts.notifications,
+    };
+    Assert(ApplyArgsManOptions(args, blockman_opts)); // no error can happen, already checked in AppInitParameterInteraction
+    try {
+        node.chainman = std::make_unique<ChainstateManager>(*Assert(node.shutdown_signal), chainman_opts, blockman_opts);
+    } catch (std::exception& e) {
+        return {ChainstateLoadStatus::FAILURE_FATAL, strprintf(Untranslated("Failed to initialize ChainstateManager: %s"), e.what())};
+    }
+    ChainstateManager& chainman = *node.chainman;
+    // This is defined and set here instead of inline in validation.h to avoid a hard
+    // dependency between validation and index/base, since the latter is not in
+    // libbitcoinkernel.
+    chainman.snapshot_download_completed = [&node]() {
+        if (!node.chainman->m_blockman.IsPruneMode()) {
+            LogPrintf("[snapshot] re-enabling NODE_NETWORK services\n");
+            node.connman->AddLocalServices(NODE_NETWORK);
+        }
+        LogPrintf("[snapshot] restarting indexes\n");
+        // Drain the validation interface queue to ensure that the old indexes
+        // don't have any pending work.
+        Assert(node.validation_signals)->SyncWithValidationInterfaceQueue();
+        for (auto* index : node.indexes) {
+            index->Interrupt();
+            index->Stop();
+            if (!(index->Init() && index->StartBackgroundSync())) {
+                LogPrintf("[snapshot] WARNING failed to restart index %s on snapshot chain\n", index->GetName());
+            }
+        }
+    };
+    node::ChainstateLoadOptions options;
+    options.mempool = Assert(node.mempool.get());
+    options.wipe_block_tree_db = do_reindex;
+    options.wipe_chainstate_db = do_reindex || do_reindex_chainstate;
+    options.prune = chainman.m_blockman.IsPruneMode();
+    options.check_blocks = args.GetIntArg("-checkblocks", DEFAULT_CHECKBLOCKS);
+    options.check_level = args.GetIntArg("-checklevel", DEFAULT_CHECKLEVEL);
+    options.require_full_verification = args.IsArgSet("-checkblocks") || args.IsArgSet("-checklevel");
+    options.coins_error_cb = [] {
+        uiInterface.ThreadSafeMessageBox(
+            _("Error reading from database, shutting down."),
+            "", CClientUIInterface::MSG_ERROR);
+    };
+    uiInterface.InitMessage(_("Loading block index…").translated);
+    const auto load_block_index_start_time{SteadyClock::now()};
+    auto catch_exceptions = [](auto&& f) {
+        try {
+            return f();
+        } catch (const std::exception& e) {
+            LogError("%s\n", e.what());
+            return std::make_tuple(node::ChainstateLoadStatus::FAILURE, _("Error loading databases"));
+        }
+    };
+    auto [status, error] = catch_exceptions([&] { return LoadChainstate(chainman, cache_sizes, options); });
+    if (status == node::ChainstateLoadStatus::SUCCESS) {
+        uiInterface.InitMessage(_("Verifying blocks…").translated);
+        if (chainman.m_blockman.m_have_pruned && options.check_blocks > MIN_BLOCKS_TO_KEEP) {
+            LogWarning("pruned datadir may not have more than %d blocks; only checking available blocks\n",
+                       MIN_BLOCKS_TO_KEEP);
+        }
+        std::tie(status, error) = catch_exceptions([&] { return VerifyLoadedChainstate(chainman, options); });
+        if (status == node::ChainstateLoadStatus::SUCCESS) {
+            LogPrintf(" block index %15dms\n", Ticks<std::chrono::milliseconds>(SteadyClock::now() - load_block_index_start_time));
+        }
+    }
+    return {status, error};
+};
+
 bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 {
     const ArgsManager& args = *Assert(node.args);
@@ -1240,7 +1315,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         constexpr uint64_t min_disk_space = 50 << 20; // 50 MB
         if (!CheckDiskSpace(args.GetBlocksDirPath(), min_disk_space)) {
             LogError("Shutting down due to lack of disk space!\n");
-            if (!(*Assert(node.shutdown))()) {
+            if (!(Assert(node.shutdown_request))()) {
                 LogError("Failed to send shutdown signal after disk space check\n");
             }
         }
@@ -1388,7 +1463,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
             return InitError(strprintf(_("User Agent comment (%s) contains unsafe characters."), cmt));
         uacomments.push_back(cmt);
     }
-    strSubVersion = FormatSubVersion(CLIENT_NAME, CLIENT_VERSION, uacomments);
+    strSubVersion = FormatSubVersion(UA_NAME, CLIENT_VERSION, uacomments);
     if (strSubVersion.size() > MAX_SUBVERSION_LENGTH) {
         return InitError(strprintf(_("Total length of network version string (%i) exceeds maximum length (%i). Reduce the number or size of uacomments."),
             strSubVersion.size(), MAX_SUBVERSION_LENGTH));
@@ -1521,22 +1596,9 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     // ********************************************************* Step 7: load block chain
 
-    node.notifications = std::make_unique<KernelNotifications>(*Assert(node.shutdown), node.exit_status, *Assert(node.warnings));
-    ReadNotificationArgs(args, *node.notifications);
-    ChainstateManager::Options chainman_opts{
-        .chainparams = chainparams,
-        .datadir = args.GetDataDirNet(),
-        .notifications = *node.notifications,
-        .signals = &validation_signals,
-    };
-    Assert(ApplyArgsManOptions(args, chainman_opts)); // no error can happen, already checked in AppInitParameterInteraction
-
-    BlockManager::Options blockman_opts{
-        .chainparams = chainman_opts.chainparams,
-        .blocks_dir = args.GetBlocksDirPath(),
-        .notifications = chainman_opts.notifications,
-    };
-    Assert(ApplyArgsManOptions(args, blockman_opts)); // no error can happen, already checked in AppInitParameterInteraction
+    node.notifications = std::make_unique<KernelNotifications>(Assert(node.shutdown_request), node.exit_status, *Assert(node.warnings));
+    auto& kernel_notifications{*node.notifications};
+    ReadNotificationArgs(args, kernel_notifications);
 
     // cache size calculations
     CacheSizes cache_sizes = CalculateCacheSizes(args, g_enabled_filter_types.size());
@@ -1555,124 +1617,42 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     assert(!node.mempool);
     assert(!node.chainman);
 
-    CTxMemPool::Options mempool_opts{
-        .check_ratio = chainparams.DefaultConsistencyChecks() ? 1 : 0,
-        .signals = &validation_signals,
-    };
-    auto result{ApplyArgsManOptions(args, chainparams, mempool_opts)};
-    if (!result) {
-        return InitError(util::ErrorString(result));
-    }
-
     bool do_reindex{args.GetBoolArg("-reindex", false)};
     const bool do_reindex_chainstate{args.GetBoolArg("-reindex-chainstate", false)};
 
-    for (bool fLoaded = false; !fLoaded && !ShutdownRequested(node);) {
-        bilingual_str mempool_error;
-        node.mempool = std::make_unique<CTxMemPool>(mempool_opts, mempool_error);
-        if (!mempool_error.empty()) {
-            return InitError(mempool_error);
+    // Chainstate initialization and loading may be retried once with reindexing by GUI users
+    auto [status, error] = InitAndLoadChainstate(
+        node,
+        do_reindex,
+        do_reindex_chainstate,
+        cache_sizes,
+        args);
+    if (status == ChainstateLoadStatus::FAILURE && !do_reindex && !ShutdownRequested(node)) {
+        // suggest a reindex
+        bool do_retry = uiInterface.ThreadSafeQuestion(
+            error + Untranslated(".\n\n") + _("Do you want to rebuild the databases now?"),
+            error.original + ".\nPlease restart with -reindex or -reindex-chainstate to recover.",
+            "", CClientUIInterface::MSG_ERROR | CClientUIInterface::BTN_ABORT);
+        if (!do_retry) {
+            return false;
         }
-        LogPrintf("* Using %.1f MiB for in-memory UTXO set (plus up to %.1f MiB of unused mempool space)\n", cache_sizes.coins * (1.0 / 1024 / 1024), mempool_opts.max_size_bytes * (1.0 / 1024 / 1024));
-
-        try {
-            node.chainman = std::make_unique<ChainstateManager>(*Assert(node.shutdown), chainman_opts, blockman_opts);
-        } catch (std::exception& e) {
-            return InitError(strprintf(Untranslated("Failed to initialize ChainstateManager: %s"), e.what()));
+        do_reindex = true;
+        if (!Assert(node.shutdown_signal)->reset()) {
+            LogError("Internal error: failed to reset shutdown signal.\n");
         }
-        ChainstateManager& chainman = *node.chainman;
-
-        // This is defined and set here instead of inline in validation.h to avoid a hard
-        // dependency between validation and index/base, since the latter is not in
-        // libbitcoinkernel.
-        chainman.snapshot_download_completed = [&node]() {
-            if (!node.chainman->m_blockman.IsPruneMode()) {
-                LogPrintf("[snapshot] re-enabling NODE_NETWORK services\n");
-                node.connman->AddLocalServices(NODE_NETWORK);
-            }
-
-            LogPrintf("[snapshot] restarting indexes\n");
-
-            // Drain the validation interface queue to ensure that the old indexes
-            // don't have any pending work.
-            Assert(node.validation_signals)->SyncWithValidationInterfaceQueue();
-
-            for (auto* index : node.indexes) {
-                index->Interrupt();
-                index->Stop();
-                if (!(index->Init() && index->StartBackgroundSync())) {
-                    LogPrintf("[snapshot] WARNING failed to restart index %s on snapshot chain\n", index->GetName());
-                }
-            }
-        };
-
-        node::ChainstateLoadOptions options;
-        options.mempool = Assert(node.mempool.get());
-        options.wipe_block_tree_db = do_reindex;
-        options.wipe_chainstate_db = do_reindex || do_reindex_chainstate;
-        options.prune = chainman.m_blockman.IsPruneMode();
-        options.check_blocks = args.GetIntArg("-checkblocks", DEFAULT_CHECKBLOCKS);
-        options.check_level = args.GetIntArg("-checklevel", DEFAULT_CHECKLEVEL);
-        options.require_full_verification = args.IsArgSet("-checkblocks") || args.IsArgSet("-checklevel");
-        options.coins_error_cb = [] {
-            uiInterface.ThreadSafeMessageBox(
-                _("Error reading from database, shutting down."),
-                "", CClientUIInterface::MSG_ERROR);
-        };
-
-        uiInterface.InitMessage(_("Loading block index…").translated);
-        const auto load_block_index_start_time{SteadyClock::now()};
-        auto catch_exceptions = [](auto&& f) {
-            try {
-                return f();
-            } catch (const std::exception& e) {
-                LogError("%s\n", e.what());
-                return std::make_tuple(node::ChainstateLoadStatus::FAILURE, _("Error opening block database"));
-            }
-        };
-        auto [status, error] = catch_exceptions([&]{ return LoadChainstate(chainman, cache_sizes, options); });
-        if (status == node::ChainstateLoadStatus::SUCCESS) {
-            uiInterface.InitMessage(_("Verifying blocks…").translated);
-            if (chainman.m_blockman.m_have_pruned && options.check_blocks > MIN_BLOCKS_TO_KEEP) {
-                LogWarning("pruned datadir may not have more than %d blocks; only checking available blocks\n",
-                                  MIN_BLOCKS_TO_KEEP);
-            }
-            std::tie(status, error) = catch_exceptions([&]{ return VerifyLoadedChainstate(chainman, options);});
-            if (status == node::ChainstateLoadStatus::SUCCESS) {
-                fLoaded = true;
-                LogPrintf(" block index %15dms\n", Ticks<std::chrono::milliseconds>(SteadyClock::now() - load_block_index_start_time));
-            }
-        }
-
-        if (status == node::ChainstateLoadStatus::FAILURE_FATAL || status == node::ChainstateLoadStatus::FAILURE_INCOMPATIBLE_DB || status == node::ChainstateLoadStatus::FAILURE_INSUFFICIENT_DBCACHE) {
-            return InitError(error);
-        }
-
-        if (!fLoaded && !ShutdownRequested(node)) {
-            // first suggest a reindex
-            if (!do_reindex) {
-                bool fRet = uiInterface.ThreadSafeQuestion(
-                    error + Untranslated(".\n\n") + _("Do you want to rebuild the block database now?"),
-                    error.original + ".\nPlease restart with -reindex or -reindex-chainstate to recover.",
-                    "", CClientUIInterface::MSG_ERROR | CClientUIInterface::BTN_ABORT);
-                if (fRet) {
-                    do_reindex = true;
-                    if (!Assert(node.shutdown)->reset()) {
-                        LogError("Internal error: failed to reset shutdown signal.\n");
-                    }
-                } else {
-                    LogError("Aborted block database rebuild. Exiting.\n");
-                    return false;
-                }
-            } else {
-                return InitError(error);
-            }
-        }
+        std::tie(status, error) = InitAndLoadChainstate(
+            node,
+            do_reindex,
+            do_reindex_chainstate,
+            cache_sizes,
+            args);
+    }
+    if (status != ChainstateLoadStatus::SUCCESS && status != ChainstateLoadStatus::INTERRUPTED) {
+        return InitError(error);
     }
 
     // As LoadBlockIndex can take several minutes, it's possible the user
     // requested to kill the GUI during the last operation. If so, exit.
-    // As the program has not fully started yet, Shutdown() is possibly overkill.
     if (ShutdownRequested(node)) {
         LogPrintf("Shutdown requested. Exiting.\n");
         return false;
@@ -1730,7 +1710,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         // Prior to setting NODE_NETWORK, check if we can provide historical blocks.
         if (!WITH_LOCK(chainman.GetMutex(), return chainman.BackgroundSyncInProgress())) {
             LogPrintf("Setting NODE_NETWORK on non-prune mode\n");
-            nLocalServices = ServiceFlags(nLocalServices | NODE_NETWORK);
+            g_local_services = ServiceFlags(g_local_services | NODE_NETWORK);
         } else {
             LogPrintf("Running node in NODE_NETWORK_LIMITED mode until snapshot background sync completes\n");
         }
@@ -1768,15 +1748,6 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         }
     }
 
-    // Either install a handler to notify us when genesis activates, or set fHaveGenesis directly.
-    // No locking, as this happens before any background thread is started.
-    boost::signals2::connection block_notify_genesis_wait_connection;
-    if (WITH_LOCK(chainman.GetMutex(), return chainman.ActiveChain().Tip() == nullptr)) {
-        block_notify_genesis_wait_connection = uiInterface.NotifyBlockTip_connect(std::bind(BlockNotifyGenesisWait, std::placeholders::_2));
-    } else {
-        fHaveGenesis = true;
-    }
-
 #if HAVE_SYSTEM
     const std::string block_notify = args.GetArg("-blocknotify", "");
     if (!block_notify.empty()) {
@@ -1801,7 +1772,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         ImportBlocks(chainman, vImportFiles);
         if (args.GetBoolArg("-stopafterblockimport", DEFAULT_STOPAFTERBLOCKIMPORT)) {
             LogPrintf("Stopping after block import\n");
-            if (!(*Assert(node.shutdown))()) {
+            if (!(Assert(node.shutdown_request))()) {
                 LogError("Failed to send shutdown signal after finishing block import\n");
             }
             return;
@@ -1821,15 +1792,11 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     });
 
     // Wait for genesis block to be processed
-    {
-        WAIT_LOCK(g_genesis_wait_mutex, lock);
-        // We previously could hang here if shutdown was requested prior to
-        // ImportBlocks getting started, so instead we just wait on a timer to
-        // check ShutdownRequested() regularly.
-        while (!fHaveGenesis && !ShutdownRequested(node)) {
-            g_genesis_wait_cv.wait_for(lock, std::chrono::milliseconds(500));
-        }
-        block_notify_genesis_wait_connection.disconnect();
+    if (WITH_LOCK(chainman.GetMutex(), return chainman.ActiveTip() == nullptr)) {
+        WAIT_LOCK(kernel_notifications.m_tip_block_mutex, lock);
+        kernel_notifications.m_tip_block_cv.wait(lock, [&]() EXCLUSIVE_LOCKS_REQUIRED(kernel_notifications.m_tip_block_mutex) {
+            return !kernel_notifications.m_tip_block.IsNull() || ShutdownRequested(node);
+        });
     }
 
     if (ShutdownRequested(node)) {
@@ -1838,17 +1805,17 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     // ********************************************************* Step 12: start node
 
-    //// debug print
     int64_t best_block_time{};
     {
-        LOCK(cs_main);
+        LOCK(chainman.GetMutex());
+        const auto& tip{*Assert(chainman.ActiveTip())};
         LogPrintf("block tree size = %u\n", chainman.BlockIndex().size());
-        chain_active_height = chainman.ActiveChain().Height();
-        best_block_time = chainman.ActiveChain().Tip() ? chainman.ActiveChain().Tip()->GetBlockTime() : chainman.GetParams().GenesisBlock().GetBlockTime();
+        chain_active_height = tip.nHeight;
+        best_block_time = tip.GetBlockTime();
         if (tip_info) {
             tip_info->block_height = chain_active_height;
             tip_info->block_time = best_block_time;
-            tip_info->verification_progress = GuessVerificationProgress(chainman.GetParams().TxData(), chainman.ActiveChain().Tip());
+            tip_info->verification_progress = GuessVerificationProgress(chainman.GetParams().TxData(), &tip);
         }
         if (tip_info && chainman.m_best_header) {
             tip_info->header_height = chainman.m_best_header->nHeight;
@@ -1858,11 +1825,11 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     LogPrintf("nBestHeight = %d\n", chain_active_height);
     if (node.peerman) node.peerman->SetBestBlock(chain_active_height, std::chrono::seconds{best_block_time});
 
-    // Map ports with UPnP or NAT-PMP.
-    StartMapPort(args.GetBoolArg("-upnp", DEFAULT_UPNP), args.GetBoolArg("-natpmp", DEFAULT_NATPMP));
+    // Map ports with NAT-PMP
+    StartMapPort(args.GetBoolArg("-natpmp", DEFAULT_NATPMP));
 
     CConnman::Options connOptions;
-    connOptions.nLocalServices = nLocalServices;
+    connOptions.m_local_services = g_local_services;
     connOptions.m_max_automatic_connections = nMaxConnections;
     connOptions.uiInterface = &uiInterface;
     connOptions.m_banman = node.banman.get();
@@ -2017,11 +1984,6 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     // cannot yet be called. Before we make it callable, we need to make sure
     // that the RPC's view of the best block is valid and consistent with
     // ChainstateManager's active tip.
-    //
-    // If we do not do this, RPC's view of the best block will be height=0 and
-    // hash=0x0. This will lead to erroroneous responses for things like
-    // waitforblockheight.
-    RPCNotifyBlockChange(WITH_LOCK(chainman.GetMutex(), return chainman.ActiveTip()));
     SetRPCWarmupFinished();
 
     uiInterface.InitMessage(_("Done loading").translated);
