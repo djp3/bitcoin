@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2021 The Bitcoin Core developers
+// Copyright (c) 2009-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -33,14 +33,14 @@ private:
     bool WriteKey(DataStream&& key, DataStream&& value, bool overwrite=true) override { return true; }
     bool EraseKey(DataStream&& key) override { return true; }
     bool HasKey(DataStream&& key) override { return true; }
-    bool ErasePrefix(Span<const std::byte> prefix) override { return true; }
+    bool ErasePrefix(std::span<const std::byte> prefix) override { return true; }
 
 public:
     void Flush() override {}
     void Close() override {}
 
     std::unique_ptr<DatabaseCursor> GetNewCursor() override { return std::make_unique<DummyCursor>(); }
-    std::unique_ptr<DatabaseCursor> GetNewPrefixCursor(Span<const std::byte> prefix) override { return GetNewCursor(); }
+    std::unique_ptr<DatabaseCursor> GetNewPrefixCursor(std::span<const std::byte> prefix) override { return GetNewCursor(); }
     bool TxnBegin() override { return true; }
     bool TxnCommit() override { return true; }
     bool TxnAbort() override { return true; }
@@ -100,7 +100,7 @@ bool RecoverDatabaseFile(const ArgsManager& args, const fs::path& file_path, bil
                                        newFilename.c_str(), DB_AUTO_COMMIT);
     if (result != 0)
     {
-        error = strprintf(Untranslated("Failed to rename %s to %s"), filename, newFilename);
+        error = Untranslated(strprintf("Failed to rename %s to %s", filename, newFilename));
         return false;
     }
 
@@ -120,7 +120,7 @@ bool RecoverDatabaseFile(const ArgsManager& args, const fs::path& file_path, bil
         warnings.emplace_back(Untranslated("Salvage: Database salvage found errors, all data may not be recoverable."));
     }
     if (result != 0 && result != DB_VERIFY_BAD) {
-        error = strprintf(Untranslated("Salvage: Database salvage failed with result %d."), result);
+        error = Untranslated(strprintf("Salvage: Database salvage failed with result %d.", result));
         return false;
     }
 
@@ -161,7 +161,7 @@ bool RecoverDatabaseFile(const ArgsManager& args, const fs::path& file_path, bil
 
     if (salvagedData.empty())
     {
-        error = strprintf(Untranslated("Salvage(aggressive) found no records in %s."), newFilename);
+        error = Untranslated(strprintf("Salvage(aggressive) found no records in %s.", newFilename));
         return false;
     }
 
@@ -173,7 +173,7 @@ bool RecoverDatabaseFile(const ArgsManager& args, const fs::path& file_path, bil
                             DB_CREATE,          // Flags
                             0);
     if (ret > 0) {
-        error = strprintf(Untranslated("Cannot create database file %s"), filename);
+        error = Untranslated(strprintf("Cannot create database file %s", filename));
         pdbCopy->close(0);
         return false;
     }
@@ -204,7 +204,7 @@ bool RecoverDatabaseFile(const ArgsManager& args, const fs::path& file_path, bil
 
         if (!fReadOK)
         {
-            warnings.push_back(strprintf(Untranslated("WARNING: WalletBatch::Recover skipping %s: %s"), strType, strErr));
+            warnings.push_back(Untranslated(strprintf("WARNING: WalletBatch::Recover skipping %s: %s", strType, strErr)));
             continue;
         }
         Dbt datKey(row.first.data(), row.first.size());

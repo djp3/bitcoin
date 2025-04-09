@@ -1,5 +1,5 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2022 The Bitcoin Core developers
+// Copyright (c) 2009-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -390,10 +390,10 @@ static RPCHelpMan getrawtransaction()
         TxToJSON(*tx, hash_block, result, chainman.ActiveChainstate());
         return result;
     }
-    if (!chainman.m_blockman.UndoReadFromDisk(blockUndo, *blockindex)) {
+    if (!chainman.m_blockman.ReadBlockUndo(blockUndo, *blockindex)) {
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Undo data expected but can't be read. This could be due to disk corruption or a conflict with a pruning event.");
     }
-    if (!chainman.m_blockman.ReadBlockFromDisk(block, *blockindex)) {
+    if (!chainman.m_blockman.ReadBlock(block, *blockindex)) {
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Block data expected but can't be read. This could be due to disk corruption or a conflict with a pruning event.");
     }
 
@@ -1074,7 +1074,7 @@ static RPCHelpMan decodepsbt()
 
             UniValue keypath(UniValue::VOBJ);
             keypath.pushKV("xpub", EncodeBase58Check(ser_xpub));
-            keypath.pushKV("master_fingerprint", HexStr(Span<unsigned char>(xpub_pair.first.fingerprint, xpub_pair.first.fingerprint + 4)));
+            keypath.pushKV("master_fingerprint", HexStr(std::span<unsigned char>(xpub_pair.first.fingerprint, xpub_pair.first.fingerprint + 4)));
             keypath.pushKV("path", WriteHDKeypath(xpub_pair.first.path));
             global_xpubs.push_back(std::move(keypath));
         }

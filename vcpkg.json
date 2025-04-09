@@ -8,9 +8,10 @@
     "libevent"
   ],
   "default-features": [
-    "qt5",
+    "qt",
     "tests",
     "wallet",
+    "berkeleydb",
     "zeromq"
   ],
   "features": {
@@ -20,18 +21,12 @@
         "berkeleydb"
       ]
     },
-    "qt5": {
-      "description": "Build GUI, Qt 5",
+    "qt": {
+      "description": "Build GUI, Qt 6",
       "dependencies": [
-        "qt5-base",
-        "qt5-tools",
+        "qtbase",
+        "qttools",
         "libqrencode"
-      ]
-    },
-    "sqlite": {
-      "description": "Enable SQLite wallet support",
-      "dependencies": [
-        "sqlite3"
       ]
     },
     "tests": {
@@ -41,9 +36,8 @@
       ]
     },
     "wallet": {
-      "description": "Enable wallet",
+      "description": "Enable wallet (SQLite)",
       "dependencies": [
-        "berkeleydb",
         "sqlite3"
       ]
     },
